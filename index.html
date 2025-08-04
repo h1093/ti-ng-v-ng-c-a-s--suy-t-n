@@ -16,23 +16,24 @@
       @import url('https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,700;1,400&display=swap');
       body {
         font-family: 'Crimson Text', serif;
+        background-color: black;
       }
       
-      /* Sanity Effects from GameScreen.tsx */
+      /* Sanity Effects */
       @keyframes shake {
         0%, 100% { transform: translateX(0); }
-        10%, 30%, 50%, 70%, 90% { transform: translateX(calc(-1 * var(--shake-intensity))); }
-        20%, 40%, 60%, 80% { transform: translateX(var(--shake-intensity)); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(calc(-1 * var(--shake-intensity, 0px))); }
+        20%, 40%, 60%, 80% { transform: translateX(var(--shake-intensity, 0px)); }
       }
       .sanity-shake {
         animation: shake 0.5s infinite;
       }
       .sanity-vignette {
-        position: absolute;
+        position: fixed;
         top: 0; left: 0; right: 0; bottom: 0;
-        box-shadow: inset 0 0 10vw 5vw rgba(0, 0, 0, var(--vignette-opacity));
+        box-shadow: inset 0 0 10vw 5vw rgba(0, 0, 0, var(--vignette-opacity, 0));
         pointer-events: none;
-        z-index: 50;
+        z-index: 9999;
       }
       @keyframes noise-anim {
           0% { transform: translate(0, 0); }
@@ -48,14 +49,14 @@
           100% { transform: translate(5%, 0); }
       }
       .sanity-noise {
-        position: absolute;
+        position: fixed;
         top: -50%; left: -50%;
         width: 200%; height: 200%;
         background-image: url('https://www.transparenttextures.com/patterns/stardust.png');
-        opacity: calc(var(--sanity-factor) * 0.15);
+        opacity: calc(var(--sanity-factor, 0) * 0.15);
         animation: noise-anim 0.2s infinite;
         pointer-events: none;
-        z-index: 50;
+        z-index: 9999;
       }
     </style>
     
@@ -63,25 +64,22 @@
     <script type="importmap">
     {
       "imports": {
-        "react-dom/client": "https://esm.sh/react-dom@^19.1.1/client",
+        "react-dom/client": "https://esm.sh/react-dom@19.0.0-rc.0/client",
         "@google/genai": "https://esm.sh/@google/genai@^1.12.0",
-        "react": "https://esm.sh/react@^19.1.1"
+        "react": "https://esm.sh/react@19.0.0-rc.0"
       }
     }
     </script>
     
-    <!-- Babel for in-browser transpilation -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
 <link rel="stylesheet" href="/index.css">
 </head>
   <body class="bg-black">
     <div id="root"></div>
     
     <!-- All Application Code -->
-    <script type="text/babel" data-type="module">
+    <script type="module">
 // --- HOISTED IMPORTS ---
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
 
@@ -428,6 +426,11 @@ function getApiKey_internal() {
     if (ai_config.source === 'custom' && ai_config.keys.length > 0) {
         return ai_config.keys[ai_config.currentIndex];
     }
+    // This check is a failsafe. The user should not see UI asking for a key.
+    // The key is expected to be in the environment.
+    if (!process.env.API_KEY) {
+        console.warn("API_KEY environment variable not set. Default AI source may not work.");
+    }
     return process.env.API_KEY;
 }
 
@@ -462,7 +465,11 @@ function getAiConfig_internal() {
 function rotateKey_internal() {
     if (ai_config.source === 'custom' && ai_config.keys.length > 1) {
         ai_config.currentIndex = (ai_config.currentIndex + 1) % ai_config.keys.length;
-        localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(ai_config));
+        try {
+            localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(ai_config));
+        } catch(e) {
+            console.error("Could not save rotated key index to localStorage", e);
+        }
         initializeAi_internal();
         console.log(`Rotated to API key index ${ai_config.currentIndex}`);
         return true;
@@ -470,18 +477,20 @@ function rotateKey_internal() {
     return false;
 }
 
+// Initial load and initialization
 loadAiConfig_internal();
 initializeAi_internal();
 
 async function callGeminiWithRetry(params, isBackstory = false) {
     if (!ai_instance_for_service) {
-        const errorMsg = "AI Client không được khởi tạo. Vui lòng cấu hình API Key trong phần 'Quản Lý Nguồn AI' ở màn hình chính.";
+        const errorMsg = "AI Client không được khởi tạo. Vui lòng cấu hình API Key trong phần 'Quản Lý Nguồn AI' ở màn hình chính hoặc đảm bảo API Key mặc định được thiết lập đúng.";
         if (isBackstory) return errorMsg;
         throw new Error(errorMsg);
     }
     try {
         const response = await ai_instance_for_service.models.generateContent(params);
-        return response;
+        // Direct text access
+        return { text: response.text, fullResponse: response };
     } catch (error) {
         console.error("Gemini API Error:", error);
         const rotated = rotateKey_internal();
@@ -491,7 +500,8 @@ async function callGeminiWithRetry(params, isBackstory = false) {
                  if (isBackstory) return "AI Client không thể khởi tạo với key mới.";
                  throw new Error("AI Client could not be re-initialized with the new key.");
             }
-            return await ai_instance_for_service.models.generateContent(params);
+            const response = await ai_instance_for_service.models.generateContent(params);
+            return { text: response.text, fullResponse: response };
         }
         throw error;
     }
@@ -879,7 +889,7 @@ async function generateScene(
     `;
 
     try {
-        const response = await callGeminiWithRetry({
+        const { text: resultText, fullResponse } = await callGeminiWithRetry({
             model,
             contents: [{ parts: [{ text: prompt }] }],
             config: {
@@ -889,7 +899,7 @@ async function generateScene(
             },
         });
         
-        let jsonStr = response.text.trim();
+        let jsonStr = resultText.trim();
         if (jsonStr.startsWith('```json')) {
             jsonStr = jsonStr.substring(7, jsonStr.length - 3).trim();
         }
@@ -915,11 +925,11 @@ async function generateBackstory(name, gender, origin) {
         .replace('{origin}', origin);
 
     try {
-        const response = await callGeminiWithRetry({
+        const { text: resultText } = await callGeminiWithRetry({
             model,
             contents: [{ parts: [{ text: prompt }] }],
         }, true);
-        return response.text.trim();
+        return resultText.trim();
     } catch (error) {
         console.error("Lỗi khi tạo tiểu sử:", error);
         return "Số phận của bạn chìm trong bóng tối, không thể nào đọc được.";
@@ -959,647 +969,697 @@ const AiSourceManagerModal = ({ isOpen, onClose, saveConfig, getConfig }) => {
     setCurrentConfig(newConfig);
   }
 
-  const isDefaultActive = currentConfig.source === 'default';
+  const isDefaultActive = currentConfig.source === 'default' || currentConfig.keys.length === 0;
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="ai-manager-title">
-      <div className="w-full max-w-lg bg-[#202123] text-gray-200 rounded-lg shadow-2xl p-6 border border-gray-700 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
-        <header className="flex justify-between items-center">
-          <h2 id="ai-manager-title" className="text-2xl font-bold" style={{color: '#ff9d9d'}}>Quản Lý Nguồn AI</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white text-3xl" aria-label="Đóng">&times;</button>
-        </header>
-
-        <main className="flex flex-col gap-4">
-          {/* Default AI Section */}
-          <div className={`p-4 border rounded-lg transition-all ${isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`}>
-            <h3 className="font-bold text-lg mb-3 text-gray-300">Nguồn AI Mặc Định</h3>
-            <button
-              onClick={handleSelectDefault}
-              className="w-full flex items-center justify-center gap-3 p-3 rounded-md bg-gray-700/60 hover:bg-gray-700/90 transition-colors"
-            >
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
-                <path d="M12 2.5L13.1875 5.59375L16.2812 6.78125L13.1875 7.96875L12 11L10.8125 7.96875L7.71875 6.78125L10.8125 5.59375L12 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M5.5 8.5L6.4375 10.8125L8.75 11.75L6.4375 12.6875L5.5 15L4.5625 12.6875L2.25 11.75L4.5625 10.8125L5.5 8.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d="M18.5 11.5L19.4375 13.8125L21.75 14.75L19.4375 15.6875L18.5 18L17.5625 15.6875L15.25 14.75L17.5625 13.8125L18.5 11.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              Sử Dụng Gemini AI Mặc Định
-            </button>
-            {isDefaultActive && <p className="text-center mt-2 text-blue-400 font-semibold">Đang hoạt động</p>}
-          </div>
-
-          <div className="flex items-center gap-4">
-            <hr className="flex-grow border-gray-600" />
-            <span className="text-gray-500">hoặc</span>
-            <hr className="flex-grow border-gray-600" />
-          </div>
-
-          {/* Custom API Key Section */}
-          <div className={`p-4 border rounded-lg transition-all ${!isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`}>
-            <h3 className="font-bold text-lg mb-3 text-gray-300">Sử Dụng API Key Của Bạn</h3>
-            <textarea
-              value={keysInput}
-              onChange={e => setKeysInput(e.target.value)}
-              placeholder="dán api_key_1&#10;dán api_key_2&#10;..."
-              rows={4}
-              className="w-full bg-gray-900/80 border border-gray-600 p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-            ></textarea>
-            <p className="text-xs text-gray-400 mt-2">
-              Nhập một hoặc nhiều API Key Gemini, mỗi key một dòng (sử dụng Shift + Enter để xuống dòng). API Key sẽ được lưu cục bộ. Ứng dụng sẽ tự động xoay vòng key nếu một key gặp lỗi.
-            </p>
-            <button onClick={handleSaveCustom} className="w-full mt-4 px-6 py-2 rounded-md bg-gray-700/60 hover:bg-gray-700/90 transition-colors font-semibold">
-              Lưu và Sử Dụng Các Key Này
-            </button>
-            {!isDefaultActive && <p className="text-center mt-2 text-blue-400 font-semibold">Đang hoạt động</p>}
-          </div>
-        </main>
-        
-        <footer className="flex justify-end gap-4 mt-2 border-t border-gray-700 pt-4">
-            <button onClick={onClose} className="px-8 py-2 rounded-md bg-gray-600/70 hover:bg-gray-600 transition-colors">Đóng</button>
-        </footer>
-      </div>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm",
+    onClick: onClose,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "ai-manager-title"
+  }, React.createElement("div", {
+    className: "w-full max-w-lg bg-[#202123] text-gray-200 rounded-lg shadow-2xl p-6 border border-gray-700 flex flex-col gap-4",
+    onClick: e => e.stopPropagation()
+  }, React.createElement("header", {
+    className: "flex justify-between items-center"
+  }, React.createElement("h2", {
+    id: "ai-manager-title",
+    className: "text-2xl font-bold",
+    style: {
+      color: '#ff9d9d'
+    }
+  }, "Quản Lý Nguồn AI"), React.createElement("button", {
+    onClick: onClose,
+    className: "text-gray-400 hover:text-white text-3xl",
+    "aria-label": "Đóng"
+  }, "×")), React.createElement("main", {
+    className: "flex flex-col gap-4"
+  }, React.createElement("div", {
+    className: `p-4 border rounded-lg transition-all ${isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`
+  }, React.createElement("h3", {
+    className: "font-bold text-lg mb-3 text-gray-300"
+  }, "Nguồn AI Mặc Định"), React.createElement("button", {
+    onClick: handleSelectDefault,
+    className: "w-full flex items-center justify-center gap-3 p-3 rounded-md bg-gray-700/60 hover:bg-gray-700/90 transition-colors"
+  }, React.createElement("svg", {
+    width: "24",
+    height: "24",
+    viewBox: "0 0 24 24",
+    fill: "none",
+    xmlns: "http://www.w3.org/2000/svg",
+    className: "text-white"
+  }, React.createElement("path", {
+    d: "M12 2.5L13.1875 5.59375L16.2812 6.78125L13.1875 7.96875L12 11L10.8125 7.96875L7.71875 6.78125L10.8125 5.59375L12 2.5Z",
+    stroke: "currentColor",
+    strokeWidth: "1.5",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }), React.createElement("path", {
+    d: "M5.5 8.5L6.4375 10.8125L8.75 11.75L6.4375 12.6875L5.5 15L4.5625 12.6875L2.25 11.75L4.5625 10.8125L5.5 8.5Z",
+    stroke: "currentColor",
+    strokeWidth: "1.5",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }), React.createElement("path", {
+    d: "M18.5 11.5L19.4375 13.8125L21.75 14.75L19.4375 15.6875L18.5 18L17.5625 15.6875L15.25 14.75L17.5625 13.8125L18.5 11.5Z",
+    stroke: "currentColor",
+    strokeWidth: "1.5",
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  })), "Sử Dụng Gemini AI Mặc Định"), isDefaultActive && React.createElement("p", {
+    className: "text-center mt-2 text-blue-400 font-semibold"
+  }, "Đang hoạt động")), React.createElement("div", {
+    className: "flex items-center gap-4"
+  }, React.createElement("hr", {
+    className: "flex-grow border-gray-600"
+  }), React.createElement("span", {
+    className: "text-gray-500"
+  }, "hoặc"), React.createElement("hr", {
+    className: "flex-grow border-gray-600"
+  })), React.createElement("div", {
+    className: `p-4 border rounded-lg transition-all ${!isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`
+  }, React.createElement("h3", {
+    className: "font-bold text-lg mb-3 text-gray-300"
+  }, "Sử Dụng API Key Của Bạn"), React.createElement("textarea", {
+    value: keysInput,
+    onChange: e => setKeysInput(e.target.value),
+    placeholder: "dán api_key_1\ndán api_key_2\n...",
+    rows: 4,
+    className: "w-full bg-gray-900/80 border border-gray-600 p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+  }), React.createElement("p", {
+    className: "text-xs text-gray-400 mt-2"
+  }, "Nhập một hoặc nhiều API Key Gemini, mỗi key một dòng (sử dụng Shift + Enter để xuống dòng). API Key sẽ được lưu cục bộ. Ứng dụng sẽ tự động xoay vòng key nếu một key gặp lỗi."), React.createElement("button", {
+    onClick: handleSaveCustom,
+    className: "w-full mt-4 px-6 py-2 rounded-md bg-gray-700/60 hover:bg-gray-700/90 transition-colors font-semibold"
+  }, "Lưu và Sử Dụng Các Key Này"), !isDefaultActive && React.createElement("p", {
+    className: "text-center mt-2 text-blue-400 font-semibold"
+  }, "Đang hoạt động"))), React.createElement("footer", {
+    className: "flex justify-end gap-4 mt-2 border-t border-gray-700 pt-4"
+  }, React.createElement("button", {
+    onClick: onClose,
+    className: "px-8 py-2 rounded-md bg-gray-600/70 hover:bg-gray-600 transition-colors"
+  }, "Đóng"))));
 };
 
 const LoadingSpinner = () => {
-  return (
-    <div className="flex justify-center items-center p-8">
-      <svg
-        className="animate-spin h-10 w-10 text-red-500"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        viewBox="0 0 24 24"
-      >
-        <circle
-          className="opacity-25"
-          cx="12"
-          cy="12"
-          r="10"
-          stroke="currentColor"
-          strokeWidth="4"
-        ></circle>
-        <path
-          className="opacity-75"
-          fill="currentColor"
-          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-        ></path>
-      </svg>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "flex justify-center items-center p-8"
+  }, React.createElement("svg", {
+    className: "animate-spin h-10 w-10 text-red-500",
+    xmlns: "http://www.w3.org/2000/svg",
+    fill: "none",
+    viewBox: "0 0 24 24"
+  }, React.createElement("circle", {
+    className: "opacity-25",
+    cx: "12",
+    cy: "12",
+    r: "10",
+    stroke: "currentColor",
+    strokeWidth: "4"
+  }), React.createElement("path", {
+    className: "opacity-75",
+    fill: "currentColor",
+    d: "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+  })));
 };
 
 const StatDisplay = ({ label, value, maxValue, color, className }) => {
-  const percentage = Math.max(0, (value / maxValue) * 100);
-
-  return (
-    <div className={`w-full ${className}`}>
-      <div className="flex justify-between items-center mb-1 text-sm font-bold">
-        <span className="text-gray-300">{label}</span>
-        <span className="text-gray-400">{value} / {maxValue}</span>
-      </div>
-      <div className="w-full bg-gray-700/50 rounded-full h-2.5 border border-gray-600">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ease-in-out ${color}`}
-          style={{ width: `${percentage}%` }}
-        ></div>
-      </div>
-    </div>
-  );
+  const percentage = Math.max(0, value / maxValue * 100);
+  return React.createElement("div", {
+    className: `w-full ${className}`
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-1 text-sm font-bold"
+  }, React.createElement("span", {
+    className: "text-gray-300"
+  }, label), React.createElement("span", {
+    className: "text-gray-400"
+  }, value, " / ", maxValue)), React.createElement("div", {
+    className: "w-full bg-gray-700/50 rounded-full h-2.5 border border-gray-600"
+  }, React.createElement("div", {
+    className: `h-full rounded-full transition-all duration-500 ease-in-out ${color}`,
+    style: {
+      width: `${percentage}%`
+    }
+  })));
 };
 
 const SidePanelAccordion = ({ title, children, initialOpen = false }) => {
   const [isOpen, setIsOpen] = useState(initialOpen);
-
   const contentId = `accordion-content-${title.replace(/\s+/g, '-')}`;
-
-  return (
-    <div className="border border-gray-700/50 rounded-md bg-black/20 overflow-hidden">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex justify-between items-center p-3 bg-gray-900/50 hover:bg-gray-800/60 transition-colors duration-200"
-        aria-expanded={isOpen}
-        aria-controls={contentId}
-      >
-        <h3 className="font-bold text-gray-300 text-base">{title}</h3>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className={`h-5 w-5 text-gray-400 transform transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      <div
-        id={contentId}
-        className={`transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-screen' : 'max-h-0'}`}
-      >
-        <div className="p-3">
-          {children}
-        </div>
-      </div>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "border border-gray-700/50 rounded-md bg-black/20 overflow-hidden"
+  }, React.createElement("button", {
+    onClick: () => setIsOpen(!isOpen),
+    className: "w-full flex justify-between items-center p-3 bg-gray-900/50 hover:bg-gray-800/60 transition-colors duration-200",
+    "aria-expanded": isOpen,
+    "aria-controls": contentId
+  }, React.createElement("h3", {
+    className: "font-bold text-gray-300 text-base"
+  }, title), React.createElement("svg", {
+    xmlns: "http://www.w3.org/2000/svg",
+    className: `h-5 w-5 text-gray-400 transform transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`,
+    fill: "none",
+    viewBox: "0 0 24 24",
+    stroke: "currentColor"
+  }, React.createElement("path", {
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    strokeWidth: 2,
+    d: "M19 9l-7 7-7-7"
+  }))), React.createElement("div", {
+    id: contentId,
+    className: `transition-all duration-300 ease-in-out overflow-hidden ${isOpen ? 'max-h-screen' : 'max-h-0'}`
+  }, React.createElement("div", {
+    className: "p-3"
+  }, children)));
 };
 
 const statusColors = {
-  'Khỏe Mạnh': 'rgba(74, 222, 128, 0.4)',    // green-400
-  'Bị Thương': 'rgba(250, 204, 21, 0.6)',    // yellow-400
-  'Nguy Kịch': 'rgba(239, 68, 68, 0.7)',     // red-500
-  'Bị Cắt Đứt': 'rgba(107, 114, 128, 0.8)', // gray-500
+  'Khỏe Mạnh': 'rgba(74, 222, 128, 0.4)',
+  'Bị Thương': 'rgba(250, 204, 21, 0.6)',
+  'Nguy Kịch': 'rgba(239, 68, 68, 0.7)',
+  'Bị Cắt Đứt': 'rgba(107, 114, 128, 0.8)'
 };
 
-const BodyPartComponent = ({ part, d, fill, onClick, interactive }) => (
-    <g 
-        onClick={onClick} 
-        className={interactive ? 'cursor-pointer transition-all duration-200 hover:stroke-yellow-400 hover:stroke-2' : ''}
-        aria-label={interactive ? `Nhắm vào ${part}`: part}
-    >
-        <title>{part}</title>
-        <path d={d} fill={fill} stroke="#9ca3af" strokeWidth="1" />
-    </g>
-);
+const BodyPartComponent = ({ part, d, fill, onClick, interactive }) => React.createElement("g", {
+  onClick: onClick,
+  className: interactive ? 'cursor-pointer transition-all duration-200 hover:stroke-yellow-400 hover:stroke-2' : '',
+  "aria-label": interactive ? `Nhắm vào ${part}` : part
+}, React.createElement("title", null, part), React.createElement("path", {
+  d: d,
+  fill: fill,
+  stroke: "#9ca3af",
+  strokeWidth: "1"
+}));
 
 const BodyStatus = ({ bodyParts, interactive = false, onPartClick }) => {
-  return (
-    <div className="p-2 border border-gray-700 bg-black/20 rounded-md">
-        <svg viewBox="0 0 100 130" className="w-full h-auto" aria-label="Sơ đồ trạng thái cơ thể">
-            <title>Sơ đồ cơ thể</title>
-            
-            <g 
-                onClick={() => onPartClick?.('head')}
-                className={interactive ? 'cursor-pointer transition-all duration-200 hover:stroke-yellow-400 hover:stroke-2' : ''}
-                aria-label={interactive ? `Nhắm vào đầu` : 'đầu'}
-            >
-                <title>Đầu</title>
-                <circle cx="50" cy="25" r="15" fill={statusColors[bodyParts.head]} stroke="#9ca3af" strokeWidth="1" />
-            </g>
-            
-            <BodyPartComponent part="torso" d="M 38,40 L 62,40 L 68,85 L 32,85 Z" fill={statusColors[bodyParts.torso]} onClick={() => onPartClick?.('torso')} interactive={interactive} />
-            <BodyPartComponent part="leftArm" d="M 38,45 L 28,50 L 20,80 L 28,85 Z" fill={statusColors[bodyParts.leftArm]} onClick={() => onPartClick?.('leftArm')} interactive={interactive} />
-            <BodyPartComponent part="rightArm" d="M 62,45 L 72,50 L 80,80 L 72,85 Z" fill={statusColors[bodyParts.rightArm]} onClick={() => onPartClick?.('rightArm')} interactive={interactive} />
-            <BodyPartComponent part="leftLeg" d="M 32,85 L 48,85 L 40,125 L 25,120 Z" fill={statusColors[bodyParts.leftLeg]} onClick={() => onPartClick?.('leftLeg')} interactive={interactive} />
-            <BodyPartComponent part="rightLeg" d="M 68,85 L 52,85 L 60,125 L 75,120 Z" fill={statusColors[bodyParts.rightLeg]} onClick={() => onPartClick?.('rightLeg')} interactive={interactive} />
-        </svg>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "p-2 border border-gray-700 bg-black/20 rounded-md"
+  }, React.createElement("svg", {
+    viewBox: "0 0 100 130",
+    className: "w-full h-auto",
+    "aria-label": "Sơ đồ trạng thái cơ thể"
+  }, React.createElement("title", null, "Sơ đồ cơ thể"), React.createElement("g", {
+    onClick: () => onPartClick?.('head'),
+    className: interactive ? 'cursor-pointer transition-all duration-200 hover:stroke-yellow-400 hover:stroke-2' : '',
+    "aria-label": interactive ? `Nhắm vào đầu` : 'đầu'
+  }, React.createElement("title", null, "Đầu"), React.createElement("circle", {
+    cx: "50",
+    cy: "25",
+    r: "15",
+    fill: statusColors[bodyParts.head],
+    stroke: "#9ca3af",
+    strokeWidth: "1"
+  })), React.createElement(BodyPartComponent, {
+    part: "torso",
+    d: "M 38,40 L 62,40 L 68,85 L 32,85 Z",
+    fill: statusColors[bodyParts.torso],
+    onClick: () => onPartClick?.('torso'),
+    interactive: interactive
+  }), React.createElement(BodyPartComponent, {
+    part: "leftArm",
+    d: "M 38,45 L 28,50 L 20,80 L 28,85 Z",
+    fill: statusColors[bodyParts.leftArm],
+    onClick: () => onPartClick?.('leftArm'),
+    interactive: interactive
+  }), React.createElement(BodyPartComponent, {
+    part: "rightArm",
+    d: "M 62,45 L 72,50 L 80,80 L 72,85 Z",
+    fill: statusColors[bodyParts.rightArm],
+    onClick: () => onPartClick?.('rightArm'),
+    interactive: interactive
+  }), React.createElement(BodyPartComponent, {
+    part: "leftLeg",
+    d: "M 32,85 L 48,85 L 40,125 L 25,120 Z",
+    fill: statusColors[bodyParts.leftLeg],
+    onClick: () => onPartClick?.('leftLeg'),
+    interactive: interactive
+  }), React.createElement(BodyPartComponent, {
+    part: "rightLeg",
+    d: "M 68,85 L 52,85 L 60,125 L 75,120 Z",
+    fill: statusColors[bodyParts.rightLeg],
+    onClick: () => onPartClick?.('rightLeg'),
+    interactive: interactive
+  })));
 };
 
-
 const EnemyDisplay = ({ enemy, onTargetPart }) => {
-  return (
-    <div className="flex flex-col sm:flex-row gap-4 p-4 border border-gray-700 bg-red-900/10 rounded-lg">
-      <div className="w-full sm:w-1/3">
-        <BodyStatus 
-            bodyParts={enemy.bodyParts} 
-            interactive={true}
-            onPartClick={(part) => onTargetPart(enemy.id, part)}
-        />
-      </div>
-      <div className="w-full sm:w-2/3 flex flex-col">
-        <h4 className="text-lg font-bold text-red-400">{enemy.name}</h4>
-        <p className="text-sm text-gray-400 italic mb-2">{enemy.description}</p>
-        <StatDisplay
-          label="HP"
-          value={enemy.stats.hp}
-          maxValue={enemy.stats.maxHp}
-          color="bg-red-500"
-          className="mb-3"
-        />
-        <div className="mt-auto flex flex-col gap-2">
-          {enemy.statusEffects && enemy.statusEffects.length > 0 && (
-            <div className="bg-black/40 p-2 rounded border border-gray-600">
-              <p className="text-xs text-red-400 font-bold uppercase tracking-wider">Hiệu Ứng Trạng Thái</p>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {enemy.statusEffects.map((effect, index) => (
-                  <span key={index} className="text-xs bg-red-900/70 text-red-200 px-2 py-1 rounded-md">
-                    {effect}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          <div className="bg-black/40 p-2 rounded border border-gray-600">
-            <p className="text-xs text-yellow-400/80 font-bold uppercase tracking-wider">Hành động sắp tới</p>
-            <p className="text-yellow-300 italic">{enemy.telegraphedAction}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "flex flex-col sm:flex-row gap-4 p-4 border border-gray-700 bg-red-900/10 rounded-lg"
+  }, React.createElement("div", {
+    className: "w-full sm:w-1/3"
+  }, React.createElement(BodyStatus, {
+    bodyParts: enemy.bodyParts,
+    interactive: true,
+    onPartClick: part => onTargetPart(enemy.id, part)
+  })), React.createElement("div", {
+    className: "w-full sm:w-2/3 flex flex-col"
+  }, React.createElement("h4", {
+    className: "text-lg font-bold text-red-400"
+  }, enemy.name), React.createElement("p", {
+    className: "text-sm text-gray-400 italic mb-2"
+  }, enemy.description), React.createElement(StatDisplay, {
+    label: "HP",
+    value: enemy.stats.hp,
+    maxValue: enemy.stats.maxHp,
+    color: "bg-red-500",
+    className: "mb-3"
+  }), React.createElement("div", {
+    className: "mt-auto flex flex-col gap-2"
+  }, enemy.statusEffects && enemy.statusEffects.length > 0 && React.createElement("div", {
+    className: "bg-black/40 p-2 rounded border border-gray-600"
+  }, React.createElement("p", {
+    className: "text-xs text-red-400 font-bold uppercase tracking-wider"
+  }, "Hiệu Ứng Trạng Thái"), React.createElement("div", {
+    className: "flex flex-wrap gap-1 mt-1"
+  }, enemy.statusEffects.map((effect, index) => React.createElement("span", {
+    key: index,
+    className: "text-xs bg-red-900/70 text-red-200 px-2 py-1 rounded-md"
+  }, effect)))), React.createElement("div", {
+    className: "bg-black/40 p-2 rounded border border-gray-600"
+  }, React.createElement("p", {
+    className: "text-xs text-yellow-400/80 font-bold uppercase tracking-wider"
+  }, "Hành động sắp tới"), React.createElement("p", {
+    className: "text-yellow-300 italic"
+  }, enemy.telegraphedAction)))));
 };
 
 const CompanionDisplay = ({ companion }) => {
   const isUndead = companion.isUndead;
-  
   const borderColor = isUndead ? 'border-purple-700' : 'border-green-700';
   const bgColor = isUndead ? 'bg-purple-900/20' : 'bg-green-900/10';
   const nameColor = isUndead ? 'text-purple-400' : 'text-green-400';
   const effectColor = isUndead ? 'text-purple-400' : 'text-green-400';
   const effectBgColor = isUndead ? 'bg-purple-900/70' : 'bg-green-900/70';
   const effectTextColor = isUndead ? 'text-purple-200' : 'text-green-200';
-
-
-  return (
-    <div className={`p-4 border ${borderColor} ${bgColor} rounded-lg`}>
-        <div className="flex justify-between items-center mb-2">
-             <h4 className={`text-lg font-bold ${nameColor}`}>{companion.name}</h4>
-             <span className="text-sm text-gray-400 italic">{companion.type}</span>
-        </div>
-      
-        <StatDisplay
-            label="HP"
-            value={companion.stats.hp}
-            maxValue={companion.stats.maxHp}
-            color="bg-red-500"
-            className="mb-2"
-        />
-        <StatDisplay
-            label="Stamina"
-            value={companion.stats.stamina}
-            maxValue={companion.stats.maxStamina}
-            color="bg-green-500"
-        />
-       
-        {companion.statusEffects && companion.statusEffects.length > 0 && (
-            <div className="mt-3">
-              <p className={`text-xs ${effectColor} font-bold uppercase tracking-wider`}>Hiệu Ứng</p>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {companion.statusEffects.map((effect, index) => (
-                  <span key={index} className={`text-xs ${effectBgColor} ${effectTextColor} px-2 py-1 rounded-md`}>
-                    {effect}
-                  </span>
-                ))}
-              </div>
-            </div>
-        )}
-    </div>
-  );
+  return React.createElement("div", {
+    className: `p-4 border ${borderColor} ${bgColor} rounded-lg`
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-2"
+  }, React.createElement("h4", {
+    className: `text-lg font-bold ${nameColor}`
+  }, companion.name), React.createElement("span", {
+    className: "text-sm text-gray-400 italic"
+  }, companion.type)), React.createElement(StatDisplay, {
+    label: "HP",
+    value: companion.stats.hp,
+    maxValue: companion.stats.maxHp,
+    color: "bg-red-500",
+    className: "mb-2"
+  }), React.createElement(StatDisplay, {
+    label: "Stamina",
+    value: companion.stats.stamina,
+    maxValue: companion.stats.maxStamina,
+    color: "bg-green-500"
+  }), companion.statusEffects && companion.statusEffects.length > 0 && React.createElement("div", {
+    className: "mt-3"
+  }, React.createElement("p", {
+    className: `text-xs ${effectColor} font-bold uppercase tracking-wider`
+  }, "Hiệu Ứng"), React.createElement("div", {
+    className: "flex flex-wrap gap-1 mt-1"
+  }, companion.statusEffects.map((effect, index) => React.createElement("span", {
+    key: index,
+    className: `text-xs ${effectBgColor} ${effectTextColor} px-2 py-1 rounded-md`
+  }, effect)))));
 };
-
 
 const deityColors = {
-    'Sylvian': { text: 'text-green-300', bg: 'bg-green-700/50', border: 'border-green-500'},
-    'Gro-goroth': { text: 'text-red-300', bg: 'bg-red-700/50', border: 'border-red-500'},
-    'Alll-mer': { text: 'text-yellow-300', bg: 'bg-yellow-700/50', border: 'border-yellow-500'},
-    'Khaos, Đấng Hỗn Mang': { text: 'text-purple-300', bg: 'bg-purple-700/50', border: 'border-purple-500'},
-    'Aethel, Người Dệt Hư Không': { text: 'text-gray-300', bg: 'bg-gray-700/50', border: 'border-gray-500'},
-    'Lithos, Ý Chí Của Đá': { text: 'text-orange-400', bg: 'bg-orange-700/50', border: 'border-orange-500'},
+  'Sylvian': {
+    text: 'text-green-300',
+    bg: 'bg-green-700/50',
+    border: 'border-green-500'
+  },
+  'Gro-goroth': {
+    text: 'text-red-300',
+    bg: 'bg-red-700/50',
+    border: 'border-red-500'
+  },
+  'Alll-mer': {
+    text: 'text-yellow-300',
+    bg: 'bg-yellow-700/50',
+    border: 'border-yellow-500'
+  },
+  'Khaos, Đấng Hỗn Mang': {
+    text: 'text-purple-300',
+    bg: 'bg-purple-700/50',
+    border: 'border-purple-500'
+  },
+  'Aethel, Người Dệt Hư Không': {
+    text: 'text-gray-300',
+    bg: 'bg-gray-700/50',
+    border: 'border-gray-500'
+  },
+  'Lithos, Ý Chí Của Đá': {
+    text: 'text-orange-400',
+    bg: 'bg-orange-700/50',
+    border: 'border-orange-500'
+  }
 };
-
 const FaithAndSanctuaryDisplay = ({ character }) => {
-    const { faith, sanctuary } = character;
-
-    return (
-        <div className="p-4 space-y-6">
-            <div>
-                <h3 className="font-bold text-gray-300 text-xl mb-4 text-center sr-only">Tín Ngưỡng</h3>
-                <div className="space-y-4">
-                    {(Object.keys(faith)).map(deityName => {
-                        const status = faith[deityName];
-                        if (!status) return null;
-                        const colors = deityColors[deityName] || { text: 'text-gray-300', bg: 'bg-gray-700/50', border: 'border-gray-500'};
-                        const percentage = status.faithPointsToNextLevel > 0 ? Math.max(0, (status.faithPoints / status.faithPointsToNextLevel) * 100) : 0;
-
-                        return (
-                            <div key={deityName} className="bg-black/20 p-3 rounded-md border border-gray-700/50">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className={`${colors.text} font-bold text-lg`}>{deityName}</span>
-                                    <span className="text-gray-400 font-semibold">Ấn Ký {status.markLevel}</span>
-                                </div>
-                                <div className={`w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50`}>
-                                    <div
-                                    className={`h-full rounded-full transition-all duration-300 ${colors.bg.replace('/50', '')}`}
-                                    style={{ width: `${percentage}%` }}
-                                    ></div>
-                                </div>
-                                <p className="text-right text-xs text-gray-500 mt-1">{status.faithPoints} / {status.faithPointsToNextLevel} Tín ngưỡng</p>
-                            </div>
-                        )
-                    })}
-                </div>
-            </div>
-
-            {sanctuary && (
-                <div className="pt-6 border-t border-gray-700">
-                    <h3 className="font-bold text-gray-300 text-xl mb-4 text-center">Thánh Địa: {sanctuary.name}</h3>
-                     <div className="grid grid-cols-2 gap-4 text-center bg-black/20 p-3 rounded-md border border-gray-700/50">
-                        <div><span className="text-gray-400 uppercase text-xs">Hy Vọng</span><p className="font-bold text-2xl text-white">{sanctuary.hope}</p></div>
-                        <div><span className="text-gray-400 uppercase text-xs">Dân Số</span><p className="font-bold text-2xl text-white">{sanctuary.population}</p></div>
-                     </div>
-                     {sanctuary.followers.length > 0 && (
-                        <div className="mt-4">
-                             <h4 className="font-semibold text-gray-400 text-center mb-2">Tín Đồ</h4>
-                             <ul className="mt-1 flex flex-col gap-2 text-left">
-                                {sanctuary.followers.map(f => (
-                                    <li key={f.name} className="bg-black/20 px-3 py-2 rounded-md border border-gray-700/50 text-gray-300">
-                                        {f.name} <span className="text-gray-500 text-sm">- {f.status} (Lòng Trung Thành: {f.loyalty})</span>
-                                    </li>
-                                ))}
-                             </ul>
-                        </div>
-                     )}
-                </div>
-            )}
-        </div>
-    );
+  const {
+    faith,
+    sanctuary
+  } = character;
+  return React.createElement("div", {
+    className: "p-4 space-y-6"
+  }, React.createElement("div", null, React.createElement("h3", {
+    className: "font-bold text-gray-300 text-xl mb-4 text-center sr-only"
+  }, "Tín Ngưỡng"), React.createElement("div", {
+    className: "space-y-4"
+  }, Object.keys(faith).map(deityName => {
+    const status = faith[deityName];
+    if (!status) return null;
+    const colors = deityColors[deityName] || {
+      text: 'text-gray-300',
+      bg: 'bg-gray-700/50',
+      border: 'border-gray-500'
+    };
+    const percentage = status.faithPointsToNextLevel > 0 ? Math.max(0, status.faithPoints / status.faithPointsToNextLevel * 100) : 0;
+    return React.createElement("div", {
+      key: deityName,
+      className: "bg-black/20 p-3 rounded-md border border-gray-700/50"
+    }, React.createElement("div", {
+      className: "flex justify-between items-center mb-1"
+    }, React.createElement("span", {
+      className: `${colors.text} font-bold text-lg`
+    }, deityName), React.createElement("span", {
+      className: "text-gray-400 font-semibold"
+    }, "Ấn Ký ", status.markLevel)), React.createElement("div", {
+      className: `w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50`
+    }, React.createElement("div", {
+      className: `h-full rounded-full transition-all duration-300 ${colors.bg.replace('/50', '')}`,
+      style: {
+        width: `${percentage}%`
+      }
+    })), React.createElement("p", {
+      className: "text-right text-xs text-gray-500 mt-1"
+    }, status.faithPoints, " / ", status.faithPointsToNextLevel, " Tín ngưỡng"));
+  }))), sanctuary && React.createElement("div", {
+    className: "pt-6 border-t border-gray-700"
+  }, React.createElement("h3", {
+    className: "font-bold text-gray-300 text-xl mb-4 text-center"
+  }, "Thánh Địa: ", sanctuary.name), React.createElement("div", {
+    className: "grid grid-cols-2 gap-4 text-center bg-black/20 p-3 rounded-md border border-gray-700/50"
+  }, React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400 uppercase text-xs"
+  }, "Hy Vọng"), React.createElement("p", {
+    className: "font-bold text-2xl text-white"
+  }, sanctuary.hope)), React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400 uppercase text-xs"
+  }, "Dân Số"), React.createElement("p", {
+    className: "font-bold text-2xl text-white"
+  }, sanctuary.population))), sanctuary.followers.length > 0 && React.createElement("div", {
+    className: "mt-4"
+  }, React.createElement("h4", {
+    className: "font-semibold text-gray-400 text-center mb-2"
+  }, "Tín Đồ"), React.createElement("ul", {
+    className: "mt-1 flex flex-col gap-2 text-left"
+  }, sanctuary.followers.map(f => React.createElement("li", {
+    key: f.name,
+    className: "bg-black/20 px-3 py-2 rounded-md border border-gray-700/50 text-gray-300"
+  }, f.name, " ", React.createElement("span", {
+    className: "text-gray-500 text-sm"
+  }, "- ", f.status, " (Lòng Trung Thành: ", f.loyalty, ")")))))));
 };
-
 
 const InventoryDisplay = ({ inventory }) => {
   const items = Object.entries(inventory);
-
-  return (
-    <div className="p-4">
-      <h3 className="font-bold text-gray-300 text-xl mb-4 text-center sr-only">Túi Đồ</h3>
-      {items.length > 0 ? (
-        <ul className="text-sm text-gray-300 space-y-2">
-          {items.map(([name, quantity]) => (
-            <li key={name} className="flex justify-between items-center bg-black/20 p-3 rounded-md border border-gray-700/50">
-              <span className="font-semibold">{name}</span>
-              <span className="font-bold text-lg text-gray-400">x{quantity}</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-gray-500 italic text-center py-8">Trống rỗng...</p>
-      )}
-    </div>
-  );
+  return React.createElement("div", {
+    className: "p-4"
+  }, React.createElement("h3", {
+    className: "font-bold text-gray-300 text-xl mb-4 text-center sr-only"
+  }, "Túi Đồ"), items.length > 0 ? React.createElement("ul", {
+    className: "text-sm text-gray-300 space-y-2"
+  }, items.map(([name, quantity]) => React.createElement("li", {
+    key: name,
+    className: "flex justify-between items-center bg-black/20 p-3 rounded-md border border-gray-700/50"
+  }, React.createElement("span", {
+    className: "font-semibold"
+  }, name), React.createElement("span", {
+    className: "font-bold text-lg text-gray-400"
+  }, "x", quantity)))) : React.createElement("p", {
+    className: "text-sm text-gray-500 italic text-center py-8"
+  }, "Trống rỗng..."));
 };
 
-
 const ProficiencyDisplay = ({ character }) => {
-    return (
-        <div className="p-4 text-sm">
-            <h3 className="font-bold text-gray-300 text-xl mb-4 text-center sr-only">Thông Thạo</h3>
-            <div className="space-y-6">
-                <div>
-                    <h4 className="font-semibold text-red-400 mb-3 text-lg">Vũ Khí</h4>
-                    <div className="flex flex-col gap-3">
-                        {Object.entries(character.weaponProficiencies).map(([type, prof]) => (
-                            <div key={type} className="bg-black/20 p-3 rounded-md border border-gray-700/50">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-gray-200 font-bold">{type}</span>
-                                    <span className="text-gray-400 text-xs font-semibold">Cấp {prof.level}</span>
-                                </div>
-                                <div className="w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50">
-                                    <div className="bg-yellow-500 h-full rounded-full" style={{width: `${(prof.xp / prof.xpToNextLevel) * 100}%`}}></div>
-                                </div>
-                                <p className="text-right text-xs text-gray-500 mt-1">{prof.xp} / {prof.xpToNextLevel} XP</p>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="pt-6 border-t border-gray-800">
-                    <h4 className="font-semibold text-red-400 mb-3 text-lg">Phép Thuật</h4>
-                     <div className="flex flex-col gap-3">
-                        {Object.entries(character.magicMasteries).map(([school, prof]) => (
-                             <div key={school} className="bg-black/20 p-3 rounded-md border border-gray-700/50">
-                                <div className="flex justify-between items-center mb-1">
-                                    <span className="text-gray-200 font-bold">{school}</span>
-                                    <span className="text-gray-400 text-xs font-semibold">Cấp {prof.level}</span>
-                                </div>
-                                 <div className="w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50">
-                                    <div className="bg-purple-500 h-full rounded-full" style={{width: `${(prof.xp / prof.xpToNextLevel) * 100}%`}}></div>
-                                </div>
-                                <p className="text-right text-xs text-gray-500 mt-1">{prof.xp} / {prof.xpToNextLevel} XP</p>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
+  return React.createElement("div", {
+    className: "p-4 text-sm"
+  }, React.createElement("h3", {
+    className: "font-bold text-gray-300 text-xl mb-4 text-center sr-only"
+  }, "Thông Thạo"), React.createElement("div", {
+    className: "space-y-6"
+  }, React.createElement("div", null, React.createElement("h4", {
+    className: "font-semibold text-red-400 mb-3 text-lg"
+  }, "Vũ Khí"), React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, Object.entries(character.weaponProficiencies).map(([type, prof]) => React.createElement("div", {
+    key: type,
+    className: "bg-black/20 p-3 rounded-md border border-gray-700/50"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-1"
+  }, React.createElement("span", {
+    className: "text-gray-200 font-bold"
+  }, type), React.createElement("span", {
+    className: "text-gray-400 text-xs font-semibold"
+  }, "Cấp ", prof.level)), React.createElement("div", {
+    className: "w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50"
+  }, React.createElement("div", {
+    className: "bg-yellow-500 h-full rounded-full",
+    style: {
+      width: `${prof.xp / prof.xpToNextLevel * 100}%`
+    }
+  })), React.createElement("p", {
+    className: "text-right text-xs text-gray-500 mt-1"
+  }, prof.xp, " / ", prof.xpToNextLevel, " XP"))))), React.createElement("div", {
+    className: "pt-6 border-t border-gray-800"
+  }, React.createElement("h4", {
+    className: "font-semibold text-red-400 mb-3 text-lg"
+  }, "Phép Thuật"), React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, Object.entries(character.magicMasteries).map(([school, prof]) => React.createElement("div", {
+    key: school,
+    className: "bg-black/20 p-3 rounded-md border border-gray-700/50"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-1"
+  }, React.createElement("span", {
+    className: "text-gray-200 font-bold"
+  }, school), React.createElement("span", {
+    className: "text-gray-400 text-xs font-semibold"
+  }, "Cấp ", prof.level)), React.createElement("div", {
+    className: "w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50"
+  }, React.createElement("div", {
+    className: "bg-purple-500 h-full rounded-full",
+    style: {
+      width: `${prof.xp / prof.xpToNextLevel * 100}%`
+    }
+  })), React.createElement("p", {
+    className: "text-right text-xs text-gray-500 mt-1"
+  }, prof.xp, " / ", prof.xpToNextLevel, " XP")))))));
 };
 
 const SanctuaryDisplay = ({ sanctuary, onAction }) => {
-    
-    const handleAction = (followerName, task) => {
-        onAction(`[THÁNH ĐỊA] Giao cho ${followerName} nhiệm vụ ${task}.`);
-    };
-
-    return (
-        <div className="p-4 space-y-6">
-            <div>
-                <h3 className="font-bold text-cyan-400 text-2xl mb-4 text-center">Thánh Địa: {sanctuary.name}</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-center bg-black/20 p-4 rounded-md border border-gray-700/50">
-                    <div>
-                        <span className="text-gray-400 uppercase text-xs tracking-wider">Hy Vọng</span>
-                        <p className="font-bold text-3xl text-white">{sanctuary.hope}</p>
-                    </div>
-                    <div>
-                        <span className="text-gray-400 uppercase text-xs tracking-wider">Dân Số</span>
-                        <p className="font-bold text-3xl text-white">{sanctuary.population}</p>
-                    </div>
-                </div>
-            </div>
-
-            {sanctuary.followers.length > 0 && (
-                <div className="pt-6 border-t border-gray-800">
-                    <h4 className="font-semibold text-cyan-400 text-xl text-center mb-4">Quản Lý Tín Đồ</h4>
-                    <ul className="mt-1 flex flex-col gap-4 text-left">
-                        {sanctuary.followers.map(f => (
-                            <li key={f.name} className="bg-black/20 p-4 rounded-md border border-gray-700/50">
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <p className="font-bold text-lg text-gray-200">{f.name}</p>
-                                        <p className="text-gray-400 text-sm">
-                                            Lòng Trung Thành: <span className="font-semibold text-yellow-400">{f.loyalty}</span>
-                                        </p>
-                                        <p className="text-gray-400 text-sm">
-                                            Trạng Thái: <span className="italic">{f.status}</span>
-                                        </p>
-                                    </div>
-                                    <div className="flex flex-col items-end gap-2">
-                                         <button
-                                            onClick={() => handleAction(f.name, 'Tìm kiếm tài nguyên')}
-                                            disabled={f.status !== 'Idle'}
-                                            className="text-xs bg-green-800/70 border border-green-700 text-green-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
-                                            Tìm Tài Nguyên
-                                        </button>
-                                         <button
-                                            onClick={() => handleAction(f.name, 'Tuần tra Thánh Địa')}
-                                            disabled={f.status !== 'Idle'}
-                                            className="text-xs bg-blue-800/70 border border-blue-700 text-blue-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
-                                            Tuần Tra
-                                        </button>
-                                    </div>
-                                </div>
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-        </div>
-    );
+  const handleAction = (followerName, task) => {
+    onAction(`[THÁNH ĐỊA] Giao cho ${followerName} nhiệm vụ ${task}.`);
+  };
+  return React.createElement("div", {
+    className: "p-4 space-y-6"
+  }, React.createElement("div", null, React.createElement("h3", {
+    className: "font-bold text-cyan-400 text-2xl mb-4 text-center"
+  }, "Thánh Địa: ", sanctuary.name), React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 gap-4 text-center bg-black/20 p-4 rounded-md border border-gray-700/50"
+  }, React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400 uppercase text-xs tracking-wider"
+  }, "Hy Vọng"), React.createElement("p", {
+    className: "font-bold text-3xl text-white"
+  }, sanctuary.hope)), React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400 uppercase text-xs tracking-wider"
+  }, "Dân Số"), React.createElement("p", {
+    className: "font-bold text-3xl text-white"
+  }, sanctuary.population)))), sanctuary.followers.length > 0 && React.createElement("div", {
+    className: "pt-6 border-t border-gray-800"
+  }, React.createElement("h4", {
+    className: "font-semibold text-cyan-400 text-xl text-center mb-4"
+  }, "Quản Lý Tín Đồ"), React.createElement("ul", {
+    className: "mt-1 flex flex-col gap-4 text-left"
+  }, sanctuary.followers.map(f => React.createElement("li", {
+    key: f.name,
+    className: "bg-black/20 p-4 rounded-md border border-gray-700/50"
+  }, React.createElement("div", {
+    className: "flex justify-between items-start"
+  }, React.createElement("div", null, React.createElement("p", {
+    className: "font-bold text-lg text-gray-200"
+  }, f.name), React.createElement("p", {
+    className: "text-gray-400 text-sm"
+  }, "Lòng Trung Thành: ", React.createElement("span", {
+    className: "font-semibold text-yellow-400"
+  }, f.loyalty)), React.createElement("p", {
+    className: "text-gray-400 text-sm"
+  }, "Trạng Thái: ", React.createElement("span", {
+    className: "italic"
+  }, f.status))), React.createElement("div", {
+    className: "flex flex-col items-end gap-2"
+  }, React.createElement("button", {
+    onClick: () => handleAction(f.name, 'Tìm kiếm tài nguyên'),
+    disabled: f.status !== 'Idle',
+    className: "text-xs bg-green-800/70 border border-green-700 text-green-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed"
+  }, "Tìm Tài Nguyên"), React.createElement("button", {
+    onClick: () => handleAction(f.name, 'Tuần tra Thánh Địa'),
+    disabled: f.status !== 'Idle',
+    className: "text-xs bg-blue-800/70 border border-blue-700 text-blue-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed"
+  }, "Tuần Tra"))))))));
 };
 
 const CharacterDetailsModal = ({ character, onClose, onSanctuaryAction }) => {
-    
-    const TABS = [
-        { key: 'inventory', label: 'Túi Đồ', show: true },
-        { key: 'proficiency', label: 'Thông Thạo', show: true },
-        { key: 'faith', label: 'Tín Ngưỡng', show: true },
-        { key: 'sanctuary', label: 'Thánh Địa', show: !!character.sanctuary },
-    ];
-    
-    const [activeTab, setActiveTab] = useState('inventory');
-
-    const renderContent = () => {
-        switch (activeTab) {
-            case 'inventory':
-                return <InventoryDisplay inventory={character.inventory} />;
-            case 'proficiency':
-                return <ProficiencyDisplay character={character} />;
-            case 'faith':
-                return <FaithAndSanctuaryDisplay character={character} />;
-            case 'sanctuary':
-                return character.sanctuary ? <SanctuaryDisplay sanctuary={character.sanctuary} onAction={onSanctuaryAction} /> : null;
-            default:
-                return null;
-        }
-    };
-
-    return (
-        <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="character-details-title"
-        >
-            <div 
-                className="w-full max-w-3xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl shadow-red-900/20"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <header className="flex items-center justify-between p-4 border-b border-gray-700">
-                    <h2 id="character-details-title" className="text-2xl font-bold text-red-600">Chi Tiết Nhân Vật</h2>
-                    <button 
-                        onClick={onClose} 
-                        className="text-gray-400 hover:text-white text-2xl"
-                        aria-label="Đóng chi tiết nhân vật"
-                    >
-                        &times;
-                    </button>
-                </header>
-
-                <nav className="flex-shrink-0 border-b border-gray-700">
-                    <ul className="flex">
-                        {TABS.filter(tab => tab.show).map(tab => (
-                            <li key={tab.key} className="flex-1">
-                                <button
-                                    onClick={() => setActiveTab(tab.key)}
-                                    className={`w-full py-3 px-2 font-bold transition-colors duration-200 ${
-                                        activeTab === tab.key 
-                                        ? 'text-white bg-red-800/50 border-b-2 border-red-500' 
-                                        : 'text-gray-400 hover:bg-gray-800'
-                                    }`}
-                                    role="tab"
-                                    aria-selected={activeTab === tab.key}
-                                >
-                                    {tab.label}
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                </nav>
-
-                <main className="flex-grow overflow-y-auto" role="tabpanel">
-                    {renderContent()}
-                </main>
-            </div>
-        </div>
-    );
+  const TABS = [{
+    key: 'inventory',
+    label: 'Túi Đồ',
+    show: true
+  }, {
+    key: 'proficiency',
+    label: 'Thông Thạo',
+    show: true
+  }, {
+    key: 'faith',
+    label: 'Tín Ngưỡng',
+    show: true
+  }, {
+    key: 'sanctuary',
+    label: 'Thánh Địa',
+    show: !!character.sanctuary
+  }];
+  const [activeTab, setActiveTab] = useState('inventory');
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'inventory':
+        return React.createElement(InventoryDisplay, {
+          inventory: character.inventory
+        });
+      case 'proficiency':
+        return React.createElement(ProficiencyDisplay, {
+          character: character
+        });
+      case 'faith':
+        return React.createElement(FaithAndSanctuaryDisplay, {
+          character: character
+        });
+      case 'sanctuary':
+        return character.sanctuary ? React.createElement(SanctuaryDisplay, {
+          sanctuary: character.sanctuary,
+          onAction: onSanctuaryAction
+        }) : null;
+      default:
+        return null;
+    }
+  };
+  return React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm",
+    onClick: onClose,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "character-details-title"
+  }, React.createElement("div", {
+    className: "w-full max-w-3xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl shadow-red-900/20",
+    onClick: e => e.stopPropagation()
+  }, React.createElement("header", {
+    className: "flex items-center justify-between p-4 border-b border-gray-700"
+  }, React.createElement("h2", {
+    id: "character-details-title",
+    className: "text-2xl font-bold text-red-600"
+  }, "Chi Tiết Nhân Vật"), React.createElement("button", {
+    onClick: onClose,
+    className: "text-gray-400 hover:text-white text-2xl",
+    "aria-label": "Đóng chi tiết nhân vật"
+  }, "×")), React.createElement("nav", {
+    className: "flex-shrink-0 border-b border-gray-700"
+  }, React.createElement("ul", {
+    className: "flex"
+  }, TABS.filter(tab => tab.show).map(tab => React.createElement("li", {
+    key: tab.key,
+    className: "flex-1"
+  }, React.createElement("button", {
+    onClick: () => setActiveTab(tab.key),
+    className: `w-full py-3 px-2 font-bold transition-colors duration-200 ${activeTab === tab.key ? 'text-white bg-red-800/50 border-b-2 border-red-500' : 'text-gray-400 hover:bg-gray-800'}`,
+    role: "tab",
+    "aria-selected": activeTab === tab.key
+  }, tab.label))))), React.createElement("main", {
+    className: "flex-grow overflow-y-auto",
+    role: "tabpanel"
+  }, renderContent())));
 };
 
-const TABS_JOURNAL = [
-    { key: 'quests', label: 'Nhiệm Vụ' },
-    { key: 'lore', label: 'Tri Thức' },
-    { key: 'characters', label: 'Nhân Vật' },
-    { key: 'bestiary', label: 'Quái Vật' },
-];
-
+const TABS_JOURNAL = [{
+  key: 'quests',
+  label: 'Nhiệm Vụ'
+}, {
+  key: 'lore',
+  label: 'Tri Thức'
+}, {
+  key: 'characters',
+  label: 'Nhân Vật'
+}, {
+  key: 'bestiary',
+  label: 'Quái Vật'
+}];
 const Journal = ({ journal, onClose }) => {
-    const [activeTab, setActiveTab] = useState('quests');
-
-    const renderContent = () => {
-        const entries = journal[activeTab];
-        if (!entries || entries.length === 0) {
-            return <p className="text-gray-500 italic p-4 text-center">Chưa có ghi chép nào.</p>;
-        }
-
-        return (
-            <div className="p-4 space-y-4">
-                {entries.map((entry, index) => (
-                    <div key={`${activeTab}-${index}`} className="bg-black/20 p-3 rounded-md border border-gray-700/50">
-                        <h4 className="font-bold text-red-400 text-lg">{entry.title}</h4>
-                        <p className="text-gray-300 whitespace-pre-wrap">{entry.content}</p>
-                    </div>
-                ))}
-            </div>
-        );
-    };
-
-    return (
-        <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-            onClick={onClose}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="journal-title"
-        >
-            <div 
-                className="w-full max-w-3xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl shadow-red-900/20"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <header className="flex items-center justify-between p-4 border-b border-gray-700">
-                    <h2 id="journal-title" className="text-2xl font-bold text-red-600">Nhật Ký</h2>
-                    <button 
-                        onClick={onClose} 
-                        className="text-gray-400 hover:text-white text-2xl"
-                        aria-label="Đóng nhật ký"
-                    >
-                        &times;
-                    </button>
-                </header>
-
-                <nav className="flex-shrink-0 border-b border-gray-700">
-                    <ul className="flex">
-                        {TABS_JOURNAL.map(tab => (
-                            <li key={tab.key} className="flex-1">
-                                <button
-                                    onClick={() => setActiveTab(tab.key)}
-                                    className={`w-full py-3 px-2 font-bold transition-colors duration-200 ${
-                                        activeTab === tab.key 
-                                        ? 'text-white bg-red-800/50 border-b-2 border-red-500' 
-                                        : 'text-gray-400 hover:bg-gray-800'
-                                    }`}
-                                    role="tab"
-                                    aria-selected={activeTab === tab.key}
-                                >
-                                    {tab.label}
-                                </button>
-                            </li>
-                        ))}
-                    </ul>
-                </nav>
-
-                <main className="flex-grow overflow-y-auto" role="tabpanel">
-                    {renderContent()}
-                </main>
-            </div>
-        </div>
-    );
+  const [activeTab, setActiveTab] = useState('quests');
+  const renderContent = () => {
+    const entries = journal[activeTab];
+    if (!entries || entries.length === 0) {
+      return React.createElement("p", {
+        className: "text-gray-500 italic p-4 text-center"
+      }, "Chưa có ghi chép nào.");
+    }
+    return React.createElement("div", {
+      className: "p-4 space-y-4"
+    }, entries.map((entry, index) => React.createElement("div", {
+      key: `${activeTab}-${index}`,
+      className: "bg-black/20 p-3 rounded-md border border-gray-700/50"
+    }, React.createElement("h4", {
+      className: "font-bold text-red-400 text-lg"
+    }, entry.title), React.createElement("p", {
+      className: "text-gray-300 whitespace-pre-wrap"
+    }, entry.content))));
+  };
+  return React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm",
+    onClick: onClose,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "journal-title"
+  }, React.createElement("div", {
+    className: "w-full max-w-3xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl shadow-red-900/20",
+    onClick: e => e.stopPropagation()
+  }, React.createElement("header", {
+    className: "flex items-center justify-between p-4 border-b border-gray-700"
+  }, React.createElement("h2", {
+    id: "journal-title",
+    className: "text-2xl font-bold text-red-600"
+  }, "Nhật Ký"), React.createElement("button", {
+    onClick: onClose,
+    className: "text-gray-400 hover:text-white text-2xl",
+    "aria-label": "Đóng nhật ký"
+  }, "×")), React.createElement("nav", {
+    className: "flex-shrink-0 border-b border-gray-700"
+  }, React.createElement("ul", {
+    className: "flex"
+  }, TABS_JOURNAL.map(tab => React.createElement("li", {
+    key: tab.key,
+    className: "flex-1"
+  }, React.createElement("button", {
+    onClick: () => setActiveTab(tab.key),
+    className: `w-full py-3 px-2 font-bold transition-colors duration-200 ${activeTab === tab.key ? 'text-white bg-red-800/50 border-b-2 border-red-500' : 'text-gray-400 hover:bg-gray-800'}`,
+    role: "tab",
+    "aria-selected": activeTab === tab.key
+  }, tab.label))))), React.createElement("main", {
+    className: "flex-grow overflow-y-auto",
+    role: "tabpanel"
+  }, renderContent())));
 };
-
 
 const CraftingModal = ({ character, allRecipes, onCraft, onClose }) => {
   const knownRecipes = character.knownRecipeIds.map(id => allRecipes[id]).filter(Boolean);
-
-  const canCraft = (recipe) => {
+  const canCraft = recipe => {
     if (character.godMode) return true;
     for (const material of recipe.materials) {
       const hasAmount = character.inventory[material.name] || 0;
@@ -1609,254 +1669,216 @@ const CraftingModal = ({ character, allRecipes, onCraft, onClose }) => {
     }
     return true;
   };
-
-  return (
-    <div 
-        className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-        onClick={onClose}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="crafting-title"
-    >
-        <div 
-            className="w-full max-w-4xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl shadow-green-900/20"
-            onClick={(e) => e.stopPropagation()}
-        >
-            <header className="flex items-center justify-between p-4 border-b border-gray-700">
-                <h2 id="crafting-title" className="text-2xl font-bold text-green-500">Chế Tạo</h2>
-                <button 
-                    onClick={onClose} 
-                    className="text-gray-400 hover:text-white text-2xl"
-                    aria-label="Đóng cửa sổ chế tạo"
-                >
-                    &times;
-                </button>
-            </header>
-
-            <main className="flex-grow overflow-y-auto p-4 space-y-4">
-                {knownRecipes.length > 0 ? (
-                    knownRecipes.map(recipe => {
-                        const isCraftable = canCraft(recipe);
-                        return (
-                            <div key={recipe.id} className="p-4 bg-black/30 border border-gray-800 rounded-md flex flex-col md:flex-row items-start md:items-center gap-4">
-                                <div className="flex-grow">
-                                    <h3 className="text-xl font-bold text-green-300">{recipe.name}</h3>
-                                    <p className="text-sm text-gray-400 mb-2">{recipe.description}</p>
-                                    <div className="text-xs">
-                                        <span className="font-semibold text-gray-300">Vật liệu: </span>
-                                        {recipe.materials.map((mat, index) => {
-                                            const hasAmount = character.inventory[mat.name] || 0;
-                                            const color = hasAmount >= mat.quantity ? 'text-green-400' : 'text-red-400';
-                                            return (
-                                                <span key={mat.name} className="mr-2">
-                                                    {mat.name} <span className={color}>({hasAmount}/{mat.quantity})</span>
-                                                    {index < recipe.materials.length - 1 ? ', ' : ''}
-                                                </span>
-                                            )
-                                        })}
-                                    </div>
-                                    <p className="text-xs mt-1"><span className="font-semibold text-gray-300">Kết quả: </span>{recipe.result.name} x{recipe.result.quantity}</p>
-                                </div>
-                                <div className="flex-shrink-0 w-full md:w-auto">
-                                    <button 
-                                        onClick={() => onCraft(recipe)}
-                                        disabled={!isCraftable}
-                                        className="w-full md:w-auto bg-green-800/50 border border-green-700 text-green-300 font-bold py-2 px-6 rounded-sm transition-all duration-200 hover:bg-green-700 hover:text-white disabled:bg-gray-800 disabled:text-gray-500 disabled:border-gray-700 disabled:cursor-not-allowed"
-                                    >
-                                        Chế Tạo
-                                    </button>
-                                </div>
-                            </div>
-                        )
-                    })
-                ) : (
-                    <p className="text-center text-gray-500 italic py-8">Bạn chưa biết công thức chế tạo nào.</p>
-                )}
-            </main>
-        </div>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm",
+    onClick: onClose,
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "crafting-title"
+  }, React.createElement("div", {
+    className: "w-full max-w-4xl h-[80vh] flex flex-col bg-gray-900 border border-gray-700 rounded-lg shadow-2xl shadow-green-900/20",
+    onClick: e => e.stopPropagation()
+  }, React.createElement("header", {
+    className: "flex items-center justify-between p-4 border-b border-gray-700"
+  }, React.createElement("h2", {
+    id: "crafting-title",
+    className: "text-2xl font-bold text-green-500"
+  }, "Chế Tạo"), React.createElement("button", {
+    onClick: onClose,
+    className: "text-gray-400 hover:text-white text-2xl",
+    "aria-label": "Đóng cửa sổ chế tạo"
+  }, "×")), React.createElement("main", {
+    className: "flex-grow overflow-y-auto p-4 space-y-4"
+  }, knownRecipes.length > 0 ? knownRecipes.map(recipe => {
+    const isCraftable = canCraft(recipe);
+    return React.createElement("div", {
+      key: recipe.id,
+      className: "p-4 bg-black/30 border border-gray-800 rounded-md flex flex-col md:flex-row items-start md:items-center gap-4"
+    }, React.createElement("div", {
+      className: "flex-grow"
+    }, React.createElement("h3", {
+      className: "text-xl font-bold text-green-300"
+    }, recipe.name), React.createElement("p", {
+      className: "text-sm text-gray-400 mb-2"
+    }, recipe.description), React.createElement("div", {
+      className: "text-xs"
+    }, React.createElement("span", {
+      className: "font-semibold text-gray-300"
+    }, "Vật liệu: "), recipe.materials.map((mat, index) => {
+      const hasAmount = character.inventory[mat.name] || 0;
+      const color = hasAmount >= mat.quantity ? 'text-green-400' : 'text-red-400';
+      return React.createElement("span", {
+        key: mat.name,
+        className: "mr-2"
+      }, mat.name, " ", React.createElement("span", {
+        className: color
+      }, "(", hasAmount, "/", mat.quantity, ")"), index < recipe.materials.length - 1 ? ', ' : '');
+    })), React.createElement("p", {
+      className: "text-xs mt-1"
+    }, React.createElement("span", {
+      className: "font-semibold text-gray-300"
+    }, "Kết quả: "), recipe.result.name, " x", recipe.result.quantity)), React.createElement("div", {
+      className: "flex-shrink-0 w-full md:w-auto"
+    }, React.createElement("button", {
+      onClick: () => onCraft(recipe),
+      disabled: !isCraftable,
+      className: "w-full md:w-auto bg-green-800/50 border border-green-700 text-green-300 font-bold py-2 px-6 rounded-sm transition-all duration-200 hover:bg-green-700 hover:text-white disabled:bg-gray-800 disabled:text-gray-500 disabled:border-gray-700 disabled:cursor-not-allowed"
+    }, "Chế Tạo")));
+  }) : React.createElement("p", {
+    className: "text-center text-gray-500 italic py-8"
+  }, "Bạn chưa biết công thức chế tạo nào."))));
 };
 
-const PATHS = [
-    { 
-        name: 'Sức Mạnh', 
-        description: 'Tăng cường vĩnh viễn một chỉ số cốt lõi, củng cố thể chất hoặc tinh thần của bạn bằng quyền năng của thần linh.',
-        icon: '💪'
-    },
-    { 
-        name: 'Quyền Năng', 
-        description: 'Học một kỹ năng mới độc quyền, một bí mật chỉ được ban cho những tín đồ trung thành nhất.',
-        icon: '✨'
-    },
-    { 
-        name: 'Ảnh Hưởng', 
-        description: 'Chiêu mộ một tín đồ mới cho Thánh Địa của bạn, lan tỏa ảnh hưởng của vị thần và củng cố lực lượng của bạn.',
-        icon: '👥'
-    }
-];
-
+const PATHS = [{
+  name: 'Sức Mạnh',
+  description: 'Tăng cường vĩnh viễn một chỉ số cốt lõi, củng cố thể chất hoặc tinh thần của bạn bằng quyền năng của thần linh.',
+  icon: '💪'
+}, {
+  name: 'Quyền Năng',
+  description: 'Học một kỹ năng mới độc quyền, một bí mật chỉ được ban cho những tín đồ trung thành nhất.',
+  icon: '✨'
+}, {
+  name: 'Ảnh Hưởng',
+  description: 'Chiêu mộ một tín đồ mới cho Thánh Địa của bạn, lan tỏa ảnh hưởng của vị thần và củng cố lực lượng của bạn.',
+  icon: '👥'
+}];
 const MarkLevelUpModal = ({ event, onSelectPath }) => {
-    const colors = deityColors[event.deity] || { text: 'text-gray-300', bg: 'bg-gray-700/50', border: 'border-gray-500'};
-    
-    return (
-        <div 
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="mark-levelup-title"
-        >
-            <div 
-                className={`w-full max-w-4xl flex flex-col bg-gray-900 border-2 ${colors.border} rounded-lg shadow-2xl shadow-red-900/30`}
-            >
-                <header className={`p-6 text-center border-b-2 ${colors.border}`}>
-                    <h2 id="mark-levelup-title" className={`text-4xl font-bold ${colors.text}`}>Ấn Ký Thăng Cấp!</h2>
-                    <p className="text-gray-300 mt-2">
-                        Lòng trung thành của bạn đã được đền đáp. {event.deity} đã ban cho bạn sức mạnh lớn hơn.
-                    </p>
-                    <p className={`mt-1 font-bold text-xl ${colors.text}`}>Ấn Ký đạt cấp {event.newLevel}</p>
-                </header>
-
-                <main className="p-6">
-                    <h3 className="text-center text-xl font-semibold text-gray-300 mb-6">Hãy chọn con đường của bạn:</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {PATHS.map(path => (
-                            <button
-                                key={path.name}
-                                onClick={() => onSelectPath(path.name)}
-                                className={`flex flex-col items-center p-6 text-center border-2 ${colors.border} rounded-lg bg-black/30 hover:bg-black/60 hover:shadow-lg hover:shadow-current transition-all duration-300 transform hover:-translate-y-1`}
-                            >
-                                <span className="text-5xl mb-4">{path.icon}</span>
-                                <h4 className={`text-2xl font-bold ${colors.text}`}>{path.name}</h4>
-                                <p className="text-gray-400 text-sm mt-2">{path.description}</p>
-                            </button>
-                        ))}
-                    </div>
-                </main>
-            </div>
-        </div>
-    );
+  const colors = deityColors[event.deity] || {
+    text: 'text-gray-300',
+    bg: 'bg-gray-700/50',
+    border: 'border-gray-500'
+  };
+  return React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "mark-levelup-title"
+  }, React.createElement("div", {
+    className: `w-full max-w-4xl flex flex-col bg-gray-900 border-2 ${colors.border} rounded-lg shadow-2xl shadow-red-900/30`
+  }, React.createElement("header", {
+    className: `p-6 text-center border-b-2 ${colors.border}`
+  }, React.createElement("h2", {
+    id: "mark-levelup-title",
+    className: `text-4xl font-bold ${colors.text}`
+  }, "Ấn Ký Thăng Cấp!"), React.createElement("p", {
+    className: "text-gray-300 mt-2"
+  }, "Lòng trung thành của bạn đã được đền đáp. ", event.deity, " đã ban cho bạn sức mạnh lớn hơn."), React.createElement("p", {
+    className: `mt-1 font-bold text-xl ${colors.text}`
+  }, "Ấn Ký đạt cấp ", event.newLevel)), React.createElement("main", {
+    className: "p-6"
+  }, React.createElement("h3", {
+    className: "text-center text-xl font-semibold text-gray-300 mb-6"
+  }, "Hãy chọn con đường của bạn:"), React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-3 gap-6"
+  }, PATHS.map(path => React.createElement("button", {
+    key: path.name,
+    onClick: () => onSelectPath(path.name),
+    className: `flex flex-col items-center p-6 text-center border-2 ${colors.border} rounded-lg bg-black/30 hover:bg-black/60 hover:shadow-lg hover:shadow-current transition-all duration-300 transform hover:-translate-y-1`
+  }, React.createElement("span", {
+    className: "text-5xl mb-4"
+  }, path.icon), React.createElement("h4", {
+    className: `text-2xl font-bold ${colors.text}`
+  }, path.name), React.createElement("p", {
+    className: "text-gray-400 text-sm mt-2"
+  }, path.description)))))));
 };
 
 const GameOverScreen = ({ reason, onRestart }) => {
-  return (
-    <div className="w-full max-w-2xl mx-auto flex flex-col items-center text-center p-8 bg-black/50 border border-red-900 shadow-2xl shadow-red-900/50 rounded-lg">
-      <h1 className="text-6xl font-bold text-red-700 mb-4">BẠN ĐÃ CHẾT</h1>
-      <p className="text-gray-300 text-lg italic mb-8 max-w-md">
-        {reason || "Hành trình của bạn kết thúc tại đây, một linh hồn bị lãng quên nữa đã bị phế tích nuốt chửng."}
-      </p>
-      <button
-        onClick={onRestart}
-        className="bg-gray-700 border border-gray-600 text-gray-200 font-bold py-3 px-8 rounded-sm hover:bg-gray-600 hover:text-white transition-all duration-300"
-      >
-        Đối Mặt Với Bóng Tối Lần Nữa
-      </button>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "w-full max-w-2xl mx-auto flex flex-col items-center text-center p-8 bg-black/50 border border-red-900 shadow-2xl shadow-red-900/50 rounded-lg"
+  }, React.createElement("h1", {
+    className: "text-6xl font-bold text-red-700 mb-4"
+  }, "BẠN ĐÃ CHẾT"), React.createElement("p", {
+    className: "text-gray-300 text-lg italic mb-8 max-w-md"
+  }, reason || "Hành trình của bạn kết thúc tại đây, một linh hồn bị lãng quên nữa đã bị phế tích nuốt chửng."), React.createElement("button", {
+    onClick: onRestart,
+    className: "bg-gray-700 border border-gray-600 text-gray-200 font-bold py-3 px-8 rounded-sm hover:bg-gray-600 hover:text-white transition-all duration-300"
+  }, "Đối Mặt Với Bóng Tối Lần Nữa"));
 };
 
-const StartScreen = ({ 
-    onStart, 
-    hasSave, 
-    onContinue,
-    onStartCombatSandbox,
-    enableGore,
-    onGoreToggle,
-    onOpenAiManager
+const StartScreen = ({
+  onStart,
+  hasSave,
+  onContinue,
+  onStartCombatSandbox,
+  enableGore,
+  onGoreToggle,
+  onOpenAiManager
 }) => {
-  return (
-    <div className="w-full max-w-3xl mx-auto flex flex-col items-center text-center p-6 bg-black/50 border border-gray-800 shadow-2xl shadow-red-900/20 rounded-lg">
-      <img 
-        src="https://picsum.photos/seed/darkfantasy/600/300" 
-        alt="Một bóng người đơn độc đứng trước một phế tích đổ nát" 
-        className="w-full h-48 object-cover rounded-md mb-6 border-2 border-gray-700"
-      />
-      <h1 className="text-5xl font-bold text-red-600 mb-2 tracking-wider">Tiếng Vọng Của Sự Suy Tàn</h1>
-      <p className="text-gray-400 mb-8 max-w-lg">
-        Các vị thần cổ xưa đã chết, xác của họ nuôi dưỡng những con giòi đang quằn quại trong nền móng của thế giới. Bạn đến đây vì một thứ gì đó... kho báu, sự cứu rỗi, hoặc có lẽ chỉ là một cái chết huy hoàng. Bạn có thể chỉ tìm thấy sự điên loạn.
-      </p>
-      <div className="flex flex-wrap justify-center gap-4">
-        {hasSave && (
-          <button
-            onClick={onContinue}
-            className="bg-transparent border-2 border-gray-400 text-gray-300 font-bold py-3 px-8 rounded-sm hover:bg-gray-400 hover:text-black transition-all duration-300 transform hover:scale-105"
-          >
-            Tiếp Tục Hành Trình
-          </button>
-        )}
-        <button
-          onClick={() => onStart('standard')}
-          className="bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-8 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 transform hover:scale-105"
-        >
-          {hasSave ? "Bắt Đầu Lại" : "Bước vào U Tối"}
-        </button>
-        <button
-          onClick={() => onStart('custom')}
-          className="bg-transparent border-2 border-purple-500 text-purple-400 font-bold py-3 px-8 rounded-sm hover:bg-purple-500 hover:text-black transition-all duration-300 transform hover:scale-105"
-        >
-          Tạo Hành Trình Riêng
-        </button>
-        <button
-          onClick={onStartCombatSandbox}
-          className="bg-transparent border-2 border-yellow-500 text-yellow-400 font-bold py-3 px-8 rounded-sm hover:bg-yellow-500 hover:text-black transition-all duration-300 transform hover:scale-105"
-        >
-          Thử Nghiệm Chiến Đấu
-        </button>
-      </div>
-
-       <div className="mt-8 pt-6 border-t border-gray-800 w-full max-w-lg text-left">
-          <h2 className="text-xl font-bold text-yellow-400 mb-3 text-center">Nhật Ký Cập Nhật: Tiếng Vọng Từ Hư Không</h2>
-          <ul className="text-sm text-gray-400 list-disc list-inside space-y-2 bg-black/20 p-4 rounded-md border border-gray-700/50">
-              <li>
-                  <span className="font-semibold text-gray-300">Quản lý Nguồn AI:</span> Giờ bạn có thể sử dụng API Key của riêng mình. Nhấn nút 'Quản Lý Nguồn AI' bên dưới.
-              </li>
-              <li>
-                  <span className="font-semibold text-gray-300">Các Ngoại Thần đã thức tỉnh:</span> Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos).
-              </li>
-              <li>
-                  <span className="font-semibold text-gray-300">Hệ Thống Ấn Ký Mới:</span> Nhận được Ấn Ký từ các Ngoại Thần thông qua nghi lễ hoặc khi hành động của bạn thu hút sự chú ý của chúng. Mỗi Ấn Ký đều có hai mặt.
-              </li>
-          </ul>
-      </div>
-
-      <div className="mt-8 pt-4 border-t border-gray-800 w-full max-w-sm flex flex-col items-center justify-center gap-4">
-        <button onClick={onOpenAiManager} className="bg-transparent border-2 border-blue-500 text-blue-400 font-bold py-2 px-6 rounded-sm hover:bg-blue-500 hover:text-black transition-all duration-300 transform hover:scale-105">
-           Quản Lý Nguồn AI
-        </button>
-        <div className="mt-4 flex items-center justify-center gap-4">
-            <label htmlFor="gore-toggle" className="text-gray-400">Nội dung 18+:</label>
-            <div 
-                onClick={() => onGoreToggle(!enableGore)}
-                className="relative inline-flex items-center cursor-pointer"
-                id="gore-toggle"
-                role="switch"
-                aria-checked={enableGore}
-            >
-              <div className="w-11 h-6 bg-gray-600 rounded-full"></div>
-              <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${enableGore ? 'transform translate-x-5 bg-red-500' : ''}`}></div>
-            </div>
-            <span className={`font-bold ${enableGore ? 'text-red-500' : 'text-gray-500'}`}>
-                {enableGore ? 'BẬT' : 'TẮT'}
-            </span>
-        </div>
-      </div>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "w-full max-w-3xl mx-auto flex flex-col items-center text-center p-6 bg-black/50 border border-gray-800 shadow-2xl shadow-red-900/20 rounded-lg"
+  }, React.createElement("h1", {
+    className: "text-5xl font-bold text-red-600 mb-2 tracking-wider"
+  }, "Tiếng Vọng Của Sự Suy Tàn"), React.createElement("p", {
+    className: "text-gray-400 mb-8 max-w-lg"
+  }, "Các vị thần cổ xưa đã chết, xác của họ nuôi dưỡng những con giòi đang quằn quại trong nền móng của thế giới. Bạn đến đây vì một thứ gì đó... kho báu, sự cứu rỗi, hoặc có lẽ chỉ là một cái chết huy hoàng. Bạn có thể chỉ tìm thấy sự điên loạn."), React.createElement("div", {
+    className: "flex flex-wrap justify-center gap-4"
+  }, hasSave && React.createElement("button", {
+    onClick: onContinue,
+    className: "bg-transparent border-2 border-gray-400 text-gray-300 font-bold py-3 px-8 rounded-sm hover:bg-gray-400 hover:text-black transition-all duration-300 transform hover:scale-105"
+  }, "Tiếp Tục Hành Trình"), React.createElement("button", {
+    onClick: () => onStart('standard'),
+    className: "bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-8 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 transform hover:scale-105"
+  }, hasSave ? "Bắt Đầu Lại" : "Bước vào U Tối"), React.createElement("button", {
+    onClick: () => onStart('custom'),
+    className: "bg-transparent border-2 border-purple-500 text-purple-400 font-bold py-3 px-8 rounded-sm hover:bg-purple-500 hover:text-black transition-all duration-300 transform hover:scale-105"
+  }, "Tạo Hành Trình Riêng"), React.createElement("button", {
+    onClick: onStartCombatSandbox,
+    className: "bg-transparent border-2 border-yellow-500 text-yellow-400 font-bold py-3 px-8 rounded-sm hover:bg-yellow-500 hover:text-black transition-all duration-300 transform hover:scale-105"
+  }, "Thử Nghiệm Chiến Đấu")), React.createElement("div", {
+    className: "mt-8 pt-6 border-t border-gray-800 w-full max-w-lg text-left"
+  }, React.createElement("h2", {
+    className: "text-xl font-bold text-yellow-400 mb-3 text-center"
+  }, "Nhật Ký Cập Nhật: Tiếng Vọng Từ Hư Không"), React.createElement("ul", {
+    className: "text-sm text-gray-400 list-disc list-inside space-y-2 bg-black/20 p-4 rounded-md border border-gray-700/50"
+  }, React.createElement("li", null, React.createElement("span", {
+    className: "font-semibold text-gray-300"
+  }, "Quản lý Nguồn AI:"), " Giờ bạn có thể sử dụng API Key của riêng mình. Nhấn nút 'Quản Lý Nguồn AI' bên dưới."), React.createElement("li", null, React.createElement("span", {
+    className: "font-semibold text-gray-300"
+  }, "Các Ngoại Thần đã thức tỉnh:"), " Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos)."), React.createElement("li", null, React.createElement("span", {
+    className: "font-semibold text-gray-300"
+  }, "Hệ Thống Ấn Ký Mới:"), " Nhận được Ấn Ký từ các Ngoại Thần thông qua nghi lễ hoặc khi hành động của bạn thu hút sự chú ý của chúng. Mỗi Ấn Ký đều có hai mặt."))), React.createElement("div", {
+    className: "mt-8 pt-4 border-t border-gray-800 w-full max-w-sm flex flex-col items-center justify-center gap-4"
+  }, React.createElement("button", {
+    onClick: onOpenAiManager,
+    className: "bg-transparent border-2 border-blue-500 text-blue-400 font-bold py-2 px-6 rounded-sm hover:bg-blue-500 hover:text-black transition-all duration-300 transform hover:scale-105"
+  }, "Quản Lý Nguồn AI"), React.createElement("div", {
+    className: "mt-4 flex items-center justify-center gap-4"
+  }, React.createElement("label", {
+    htmlFor: "gore-toggle",
+    className: "text-gray-400"
+  }, "Nội dung 18+:"), React.createElement("div", {
+    onClick: () => onGoreToggle(!enableGore),
+    className: "relative inline-flex items-center cursor-pointer",
+    id: "gore-toggle",
+    role: "switch",
+    "aria-checked": enableGore
+  }, React.createElement("div", {
+    className: "w-11 h-6 bg-gray-600 rounded-full"
+  }), React.createElement("div", {
+    className: `dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${enableGore ? 'transform translate-x-5 bg-red-500' : ''}`
+  })), React.createElement("span", {
+    className: `font-bold ${enableGore ? 'text-red-500' : 'text-gray-500'}`
+  }, enableGore ? 'BẬT' : 'TẮT'))));
 };
 
 const BASE_STATS_TEMPLATE = {
-  hp: 50, maxHp: 50,
-  san: 50, maxSan: 50,
-  mana: 20, maxMana: 20,
-  stamina: 50, maxStamina: 50,
-  attack: 5, defense: 5, speed: 5,
+  hp: 50,
+  maxHp: 50,
+  san: 50,
+  maxSan: 50,
+  mana: 20,
+  maxMana: 20,
+  stamina: 50,
+  maxStamina: 50,
+  attack: 5,
+  defense: 5,
+  speed: 5,
   charisma: 5
 };
-
 const STATS_FOR_POINT_BUY = ['hp', 'san', 'mana', 'stamina', 'attack', 'defense', 'speed', 'charisma'];
 const ALL_MAGIC_SCHOOLS = ['Huyền Bí', 'Huyết Thuật', 'Vực Thẳm', 'Thánh Thánh'];
 const ALL_DEITIES = ['Sylvian', 'Gro-goroth', 'Alll-mer', 'Khaos, Đấng Hỗn Mang', 'Aethel, Người Dệt Hư Không', 'Lithos, Ý Chí Của Đá'];
-
 const CharacterCreationScreen = ({ onFinish, mode }) => {
   const [name, setName] = useState('');
   const [gender, setGender] = useState('Khác');
@@ -1864,24 +1886,19 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
   const [backstoryLoading, setBackstoryLoading] = useState(false);
   const [customScenario, setCustomScenario] = useState('');
   const [godMode, setGodMode] = useState(false);
-
   const [selectedDifficulty, setSelectedDifficulty] = useState(DIFFICULTIES[0]);
   const [selectedOrigin, setSelectedOrigin] = useState(null);
   const [selectedTalent, setSelectedTalent] = useState(null);
   const [selectedPersonality, setSelectedPersonality] = useState(null);
-
   const [spentPoints, setSpentPoints] = useState({});
-
-  const handleDifficultyChange = (d) => {
+  const handleDifficultyChange = d => {
     setSelectedDifficulty(d);
     setSpentPoints({});
   };
-
-  const handleOriginChange = (o) => {
+  const handleOriginChange = o => {
     setSelectedOrigin(o);
     setSelectedTalent(null);
   };
-
   const handleGenerateBackstory = useCallback(async () => {
     if (!name || !selectedOrigin) {
       alert("Vui lòng nhập Tên và chọn Nguồn Gốc trước khi tạo tiểu sử.");
@@ -1898,87 +1915,85 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
       setBackstoryLoading(false);
     }
   }, [name, gender, selectedOrigin]);
-
   const handlePointChange = (stat, amount) => {
     const currentSpent = spentPoints[stat] || 0;
     const newSpent = currentSpent + amount;
-    
-    const otherPoints = Object.entries(spentPoints)
-        .filter(([key]) => key !== stat)
-        .reduce((acc, [, val]) => acc + (val || 0), 0);
+    const otherPoints = Object.entries(spentPoints).filter(([key]) => key !== stat).reduce((acc, [, val]) => acc + (val || 0), 0);
     const totalSpent = otherPoints + newSpent;
-    
     if (newSpent >= 0 && totalSpent <= selectedDifficulty.pointBuy) {
-      setSpentPoints(prev => ({ ...prev, [stat]: newSpent }));
+      setSpentPoints(prev => ({
+        ...prev,
+        [stat]: newSpent
+      }));
     }
   };
-
   const finalStats = useMemo(() => {
-    const final = { ...BASE_STATS_TEMPLATE };
+    const final = {
+      ...BASE_STATS_TEMPLATE
+    };
     if (selectedOrigin) {
       for (const [key, value] of Object.entries(selectedOrigin.baseStats)) {
-        final[key] = (final[key] || 0) + value;
+        final[key] = (BASE_STATS_TEMPLATE[key] || 0) + value;
       }
     }
     for (const [key, value] of Object.entries(spentPoints)) {
-        final[key] = (final[key] || 0) + value;
+      final[key] = (final[key] || 0) + value;
     }
     final.maxHp = final.hp;
     final.maxSan = final.san;
     final.maxMana = final.mana;
     final.maxStamina = final.stamina;
-
     return final;
   }, [selectedOrigin, spentPoints]);
-  
   const remainingPoints = selectedDifficulty.pointBuy - Object.values(spentPoints).reduce((a, b) => a + (b || 0), 0);
-
   const isFormValid = name.trim() && selectedOrigin && selectedTalent && selectedPersonality && (godMode || remainingPoints === 0) && (mode === 'standard' || customScenario.trim());
-
   const handleSubmit = () => {
     if (!isFormValid || !selectedOrigin || !selectedTalent || !selectedPersonality) {
       alert("Vui lòng hoàn thành tất cả các lựa chọn, sử dụng hết điểm phân bổ và điền kịch bản tùy chỉnh (nếu có).");
       return;
     }
-    
     const initialBodyParts = {
-        head: 'Khỏe Mạnh',
-        torso: 'Khỏe Mạnh',
-        leftArm: 'Khỏe Mạnh',
-        rightArm: 'Khỏe Mạnh',
-        leftLeg: 'Khỏe Mạnh',
-        rightLeg: 'Khỏe Mạnh',
+      head: 'Khỏe Mạnh',
+      torso: 'Khỏe Mạnh',
+      leftArm: 'Khỏe Mạnh',
+      rightArm: 'Khỏe Mạnh',
+      leftLeg: 'Khỏe Mạnh',
+      rightLeg: 'Khỏe Mạnh'
     };
-
     const weaponProficiencies = ALL_WEAPON_PROFICIENCIES.reduce((acc, profName) => {
-        const isOriginProficiency = profName === selectedOrigin.weaponProficiency;
-        acc[profName] = { 
-            level: isOriginProficiency ? 2 : 1, 
-            xp: 0, 
-            xpToNextLevel: isOriginProficiency ? 150 : 100 
-        };
-        return acc;
+      const isOriginProficiency = profName === selectedOrigin.weaponProficiency;
+      acc[profName] = {
+        level: isOriginProficiency ? 2 : 1,
+        xp: 0,
+        xpToNextLevel: isOriginProficiency ? 150 : 100
+      };
+      return acc;
     }, {});
-    
     const magicMasteries = ALL_MAGIC_SCHOOLS.reduce((acc, school) => {
-        acc[school] = { level: 1, xp: 0, xpToNextLevel: 100 };
-        return acc;
+      acc[school] = {
+        level: 1,
+        xp: 0,
+        xpToNextLevel: 100
+      };
+      return acc;
     }, {});
-
-    const skills = selectedOrigin.startingSkills.map(skill => ({...skill, currentCooldown: 0 }));
-
+    const skills = selectedOrigin.startingSkills.map(skill => ({ ...skill,
+      currentCooldown: 0
+    }));
     const initialFaith = ALL_DEITIES.reduce((acc, deity) => {
-        acc[deity] = { markLevel: 0, faithPoints: 0, faithPointsToNextLevel: 100 };
-        return acc;
+      acc[deity] = {
+        markLevel: 0,
+        faithPoints: 0,
+        faithPointsToNextLevel: 100
+      };
+      return acc;
     }, {});
-
     const initialJournal = {
-        quests: [],
-        lore: [],
-        characters: [],
-        bestiary: [],
+      quests: [],
+      lore: [],
+      characters: [],
+      bestiary: []
     };
-
     const character = {
       name: name.trim(),
       gender,
@@ -1994,7 +2009,8 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
       thirst: 100,
       maxThirst: 100,
       reputation: selectedPersonality?.name === "Tàn nhẫn" ? -10 : 0,
-      inventory: { ...selectedOrigin.startingEquipment },
+      inventory: { ...selectedOrigin.startingEquipment
+      },
       skills: skills,
       knownRecipeIds: selectedOrigin.startingRecipes || [],
       weaponProficiencies: weaponProficiencies,
@@ -2004,136 +2020,143 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
       journal: initialJournal,
       companions: [],
       godMode: godMode,
-      customScenario: mode === 'custom' ? customScenario.trim() : undefined,
+      customScenario: mode === 'custom' ? customScenario.trim() : undefined
     };
     onFinish(character);
   };
-
-  const renderSection = (title, children, extraClasses = "") => (
-    <div className={`mb-8 p-4 border border-gray-800 rounded-md bg-black/30 ${extraClasses}`}>
-      <h2 className="text-2xl font-bold text-red-600 mb-4 border-b border-gray-700 pb-2">{title}</h2>
-      {children}
-    </div>
-  );
-
-  return (
-    <div className="w-full max-w-4xl mx-auto p-6 bg-black/70 border border-gray-800 shadow-2xl shadow-red-900/20 rounded-lg backdrop-blur-sm text-gray-300">
-      <h1 className="text-4xl font-bold text-center text-red-700 mb-6">Tạo Dựng Số Phận</h1>
-
-      {mode === 'custom' && renderSection("Kịch Bản Tùy Chỉnh", (
-        <div>
-            <p className="text-sm text-gray-400 mb-2">Viết ra bối cảnh, nhân vật và mục tiêu của bạn. AI sẽ sử dụng điều này làm điểm khởi đầu cho cuộc phiêu lưu của bạn.</p>
-            <textarea value={customScenario} onChange={e => setCustomScenario(e.target.value)} placeholder="Ví dụ: 'Tôi là một thợ săn quái vật già nua, đi tìm một loài thảo dược quý hiếm trong khu rừng bị nguyền rủa để cứu con gái mình...'" rows={5} className="w-full bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
-        </div>
-      ), "border-purple-500")}
-
-      {renderSection("Thông Tin Cơ Bản", (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Tên Nhân Vật" className="bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-red-500" />
-          <select value={gender} onChange={e => setGender(e.target.value)} className="bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-red-500">
-            <option>Nam</option>
-            <option>Nữ</option>
-            <option>Khác</option>
-          </select>
-          <div className="md:col-span-2">
-            <textarea value={backstory} onChange={e => setBackstory(e.target.value)} placeholder="Tiểu sử (tùy chọn, hoặc để AI tạo)" rows={4} className="w-full bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-red-500"></textarea>
-            <button onClick={handleGenerateBackstory} disabled={backstoryLoading || !name || !selectedOrigin} className="mt-2 bg-transparent border border-purple-500 text-purple-400 px-4 py-2 rounded text-sm hover:bg-purple-500 hover:text-black transition disabled:opacity-50 disabled:cursor-not-allowed">
-              {backstoryLoading ? <LoadingSpinner /> : "AI Tạo Tiểu Sử"}
-            </button>
-          </div>
-        </div>
-      ))}
-
-      {renderSection("Độ Khó & Chế Độ Chơi", (
-        <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {DIFFICULTIES.map(d => (
-            <button key={d.name} onClick={() => handleDifficultyChange(d)} className={`p-2 border-2 rounded transition ${selectedDifficulty.name === d.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`}>
-              <h3 className="font-bold">{d.name}</h3>
-              <p className="text-xs text-gray-400">{d.description}</p>
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 flex items-center gap-2 p-2 bg-yellow-900/20 border border-yellow-700/50 rounded-md">
-            <input type="checkbox" id="god-mode" checked={godMode} onChange={(e) => setGodMode(e.target.checked)} className="h-5 w-5 rounded bg-gray-700 border-gray-600 text-yellow-500 focus:ring-yellow-500"/>
-            <label htmlFor="god-mode" className="font-bold text-yellow-300">Ý Chí Sáng Thế (God Mode)</label>
-        </div>
-        {godMode && <p className="text-xs text-yellow-400 mt-1">Bất tử, tài nguyên vô hạn. Điểm phân bổ sẽ không cần thiết.</p>}
-        </>
-      ))}
-
-      {renderSection("Nguồn Gốc", (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {ORIGINS.map(o => (
-             <button key={o.name} onClick={() => handleOriginChange(o)} className={`p-3 border-2 rounded transition text-left h-full ${selectedOrigin?.name === o.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`}>
-              <h3 className="font-bold text-base">{o.name}</h3>
-              <p className="text-xs text-gray-400 mt-1">{o.description}</p>
-            </button>
-          ))}
-        </div>
-      ))}
-      
-      {selectedOrigin && renderSection("Thiên Phú & Kỹ năng khởi đầu", (
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-            {selectedOrigin.talents.map(t => (
-                <button key={t.name} onClick={() => setSelectedTalent(t)} className={`p-3 border-2 rounded transition text-left h-full ${selectedTalent?.name === t.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`}>
-                <h3 className="font-bold">{t.name}</h3>
-                <p className="text-xs text-gray-400 mt-1">{t.description}</p>
-                </button>
-            ))}
-            </div>
-             <div className="mt-4">
-                 <h4 className="font-bold text-gray-400">Kỹ năng khởi đầu:</h4>
-                 {selectedOrigin.startingSkills.map(s => (
-                     <div key={s.id} className="p-2 bg-gray-900/50 rounded mt-1">
-                         <p className="font-semibold text-red-400">{s.name}</p>
-                         <p className="text-xs text-gray-400">{s.description}</p>
-                     </div>
-                 ))}
-             </div>
-          </>
-      ))}
-
-
-       {renderSection("Tính Cách (Chọn 1)", (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {PERSONALITIES.map(p => (
-            <button key={p.name} onClick={() => setSelectedPersonality(p)} className={`p-3 border-2 rounded transition text-left h-full ${selectedPersonality?.name === p.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`}>
-              <h3 className="font-bold">{p.name}</h3>
-              <p className="text-xs text-gray-400 mt-1">{p.description}</p>
-            </button>
-          ))}
-        </div>
-      ))}
-
-      {!godMode && renderSection(`Phân Bổ Điểm (Còn lại: ${remainingPoints})`, (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {STATS_FOR_POINT_BUY.map(key => {
-            const statKey = key;
-            return (
-              <div key={statKey}>
-                <label className="capitalize text-gray-400">{statKey}</label>
-                <div className="flex items-center gap-2 mt-1">
-                  <button onClick={() => handlePointChange(statKey, -1)} className="px-2 py-0.5 bg-gray-700 rounded">-</button>
-                  <span className="font-bold text-lg w-16 text-center">{finalStats[statKey]}</span>
-                  <button onClick={() => handlePointChange(statKey, 1)} className="px-2 py-0.5 bg-gray-700 rounded">+</button>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ))}
-
-      <div className="text-center mt-8">
-        <button onClick={handleSubmit} disabled={!isFormValid} className="bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-12 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-red-500/50 disabled:border-red-600/50">
-          Bắt Đầu Hành Trình
-        </button>
-        {!isFormValid && <p className="text-xs text-gray-500 mt-2">Cần chọn tên, nguồn gốc, thiên phú, tính cách và dùng hết điểm (trừ khi ở God Mode). Nếu ở chế độ tùy chỉnh, hãy điền kịch bản.</p>}
-      </div>
-
-    </div>
-  );
+  const renderSection = (title, children, extraClasses = "") => React.createElement("div", {
+    className: `mb-8 p-4 border border-gray-800 rounded-md bg-black/30 ${extraClasses}`
+  }, React.createElement("h2", {
+    className: "text-2xl font-bold text-red-600 mb-4 border-b border-gray-700 pb-2"
+  }, title), children);
+  return React.createElement("div", {
+    className: "w-full max-w-4xl mx-auto p-6 bg-black/70 border border-gray-800 shadow-2xl shadow-red-900/20 rounded-lg backdrop-blur-sm text-gray-300"
+  }, React.createElement("h1", {
+    className: "text-4xl font-bold text-center text-red-700 mb-6"
+  }, "Tạo Dựng Số Phận"), mode === 'custom' && renderSection("Kịch Bản Tùy Chỉnh", React.createElement("div", null, React.createElement("p", {
+    className: "text-sm text-gray-400 mb-2"
+  }, "Viết ra bối cảnh, nhân vật và mục tiêu của bạn. AI sẽ sử dụng điều này làm điểm khởi đầu cho cuộc phiêu lưu của bạn."), React.createElement("textarea", {
+    value: customScenario,
+    onChange: e => setCustomScenario(e.target.value),
+    placeholder: "Ví dụ: 'Tôi là một thợ săn quái vật già nua, đi tìm một loài thảo dược quý hiếm trong khu rừng bị nguyền rủa để cứu con gái mình...'",
+    rows: 5,
+    className: "w-full bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-purple-500"
+  })), "border-purple-500"), renderSection("Thông Tin Cơ Bản", React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 gap-4"
+  }, React.createElement("input", {
+    type: "text",
+    value: name,
+    onChange: e => setName(e.target.value),
+    placeholder: "Tên Nhân Vật",
+    className: "bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-red-500"
+  }), React.createElement("select", {
+    value: gender,
+    onChange: e => setGender(e.target.value),
+    className: "bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-red-500"
+  }, React.createElement("option", null, "Nam"), React.createElement("option", null, "Nữ"), React.createElement("option", null, "Khác")), React.createElement("div", {
+    className: "md:col-span-2"
+  }, React.createElement("textarea", {
+    value: backstory,
+    onChange: e => setBackstory(e.target.value),
+    placeholder: "Tiểu sử (tùy chọn, hoặc để AI tạo)",
+    rows: 4,
+    className: "w-full bg-gray-900 border border-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-red-500"
+  }), React.createElement("button", {
+    onClick: handleGenerateBackstory,
+    disabled: backstoryLoading || !name || !selectedOrigin,
+    className: "mt-2 bg-transparent border border-purple-500 text-purple-400 px-4 py-2 rounded text-sm hover:bg-purple-500 hover:text-black transition disabled:opacity-50 disabled:cursor-not-allowed"
+  }, backstoryLoading ? React.createElement(LoadingSpinner, null) : "AI Tạo Tiểu Sử")))), renderSection("Độ Khó & Chế Độ Chơi", React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "grid grid-cols-2 md:grid-cols-4 gap-2"
+  }, DIFFICULTIES.map(d => React.createElement("button", {
+    key: d.name,
+    onClick: () => handleDifficultyChange(d),
+    className: `p-2 border-2 rounded transition ${selectedDifficulty.name === d.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`
+  }, React.createElement("h3", {
+    className: "font-bold"
+  }, d.name), React.createElement("p", {
+    className: "text-xs text-gray-400"
+  }, d.description)))), React.createElement("div", {
+    className: "mt-4 flex items-center gap-2 p-2 bg-yellow-900/20 border border-yellow-700/50 rounded-md"
+  }, React.createElement("input", {
+    type: "checkbox",
+    id: "god-mode",
+    checked: godMode,
+    onChange: e => setGodMode(e.target.checked),
+    className: "h-5 w-5 rounded bg-gray-700 border-gray-600 text-yellow-500 focus:ring-yellow-500"
+  }), React.createElement("label", {
+    htmlFor: "god-mode",
+    className: "font-bold text-yellow-300"
+  }, "Ý Chí Sáng Thế (God Mode)")), godMode && React.createElement("p", {
+    className: "text-xs text-yellow-400 mt-1"
+  }, "Bất tử, tài nguyên vô hạn. Điểm phân bổ sẽ không cần thiết."))), renderSection("Nguồn Gốc", React.createElement("div", {
+    className: "grid grid-cols-2 md:grid-cols-3 gap-2"
+  }, ORIGINS.map(o => React.createElement("button", {
+    key: o.name,
+    onClick: () => handleOriginChange(o),
+    className: `p-3 border-2 rounded transition text-left h-full ${selectedOrigin?.name === o.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`
+  }, React.createElement("h3", {
+    className: "font-bold text-base"
+  }, o.name), React.createElement("p", {
+    className: "text-xs text-gray-400 mt-1"
+  }, o.description))))), selectedOrigin && renderSection("Thiên Phú & Kỹ năng khởi đầu", React.createElement(React.Fragment, null, React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-3 gap-2"
+  }, selectedOrigin.talents.map(t => React.createElement("button", {
+    key: t.name,
+    onClick: () => setSelectedTalent(t),
+    className: `p-3 border-2 rounded transition text-left h-full ${selectedTalent?.name === t.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`
+  }, React.createElement("h3", {
+    className: "font-bold"
+  }, t.name), React.createElement("p", {
+    className: "text-xs text-gray-400 mt-1"
+  }, t.description)))), React.createElement("div", {
+    className: "mt-4"
+  }, React.createElement("h4", {
+    className: "font-bold text-gray-400"
+  }, "Kỹ năng khởi đầu:"), selectedOrigin.startingSkills.map(s => React.createElement("div", {
+    key: s.id,
+    className: "p-2 bg-gray-900/50 rounded mt-1"
+  }, React.createElement("p", {
+    className: "font-semibold text-red-400"
+  }, s.name), React.createElement("p", {
+    className: "text-xs text-gray-400"
+  }, s.description)))))), renderSection("Tính Cách (Chọn 1)", React.createElement("div", {
+    className: "grid grid-cols-2 md:grid-cols-3 gap-2"
+  }, PERSONALITIES.map(p => React.createElement("button", {
+    key: p.name,
+    onClick: () => setSelectedPersonality(p),
+    className: `p-3 border-2 rounded transition text-left h-full ${selectedPersonality?.name === p.name ? 'border-red-500 bg-red-900/30' : 'border-gray-700 hover:bg-gray-800'}`
+  }, React.createElement("h3", {
+    className: "font-bold"
+  }, p.name), React.createElement("p", {
+    className: "text-xs text-gray-400 mt-1"
+  }, p.description))))), !godMode && renderSection(`Phân Bổ Điểm (Còn lại: ${remainingPoints})`, React.createElement("div", {
+    className: "grid grid-cols-2 md:grid-cols-4 gap-4"
+  }, STATS_FOR_POINT_BUY.map(key => {
+    const statKey = key;
+    return React.createElement("div", {
+      key: statKey
+    }, React.createElement("label", {
+      className: "capitalize text-gray-400"
+    }, statKey), React.createElement("div", {
+      className: "flex items-center gap-2 mt-1"
+    }, React.createElement("button", {
+      onClick: () => handlePointChange(statKey, -1),
+      className: "px-2 py-0.5 bg-gray-700 rounded"
+    }, "-"), React.createElement("span", {
+      className: "font-bold text-lg w-16 text-center"
+    }, finalStats[statKey]), React.createElement("button", {
+      onClick: () => handlePointChange(statKey, 1),
+      className: "px-2 py-0.5 bg-gray-700 rounded"
+    }, "+")));
+  }))), React.createElement("div", {
+    className: "text-center mt-8"
+  }, React.createElement("button", {
+    onClick: handleSubmit,
+    disabled: !isFormValid,
+    className: "bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-12 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-red-500/50 disabled:border-red-600/50"
+  }, "Bắt Đầu Hành Trình"), !isFormValid && React.createElement("p", {
+    className: "text-xs text-gray-500 mt-2"
+  }, "Cần chọn tên, nguồn gốc, thiên phú, tính cách và dùng hết điểm (trừ khi ở God Mode). Nếu ở chế độ tùy chỉnh, hãy điền kịch bản.")));
 };
 
 const GameScreen = ({ character, scene, loading, onChoice }) => {
@@ -2142,276 +2165,287 @@ const GameScreen = ({ character, scene, loading, onChoice }) => {
   const [isCraftingOpen, setIsCraftingOpen] = useState(false);
   const [isCharacterDetailsOpen, setIsCharacterDetailsOpen] = useState(false);
   const [markLevelUpEvent, setMarkLevelUpEvent] = useState(null);
-
+  const mainContentRef = useRef(null);
   useEffect(() => {
     if (scene.markLevelUpEvent) {
       setMarkLevelUpEvent(scene.markLevelUpEvent);
     }
   }, [scene.markLevelUpEvent]);
-
-  const handleCustomActionSubmit = (e) => {
+  useEffect(() => {
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0;
+    }
+  }, [scene.description]);
+  const handleCustomActionSubmit = e => {
     e.preventDefault();
     if (customAction.trim() && !loading) {
       onChoice(customAction.trim());
       setCustomAction('');
     }
   };
-  
   const handleTargetPart = (enemyId, part) => {
-      const enemy = scene.enemies?.find(e => e.id === enemyId);
-      if (enemy && !loading) {
-        let partNameVI;
-        switch(part) {
-            case 'head': partNameVI = 'đầu'; break;
-            case 'torso': partNameVI = 'thân'; break;
-            case 'leftArm': partNameVI = 'tay trái'; break;
-            case 'rightArm': partNameVI = 'tay phải'; break;
-            case 'leftLeg': partNameVI = 'chân trái'; break;
-            case 'rightLeg': partNameVI = 'chân phải'; break;
-            default: partNameVI = part;
-        }
-        onChoice(`Tấn công ${partNameVI} của ${enemy.name}`);
+    const enemy = scene.enemies?.find(e => e.id === enemyId);
+    if (enemy && !loading) {
+      let partNameVI;
+      switch (part) {
+        case 'head':
+          partNameVI = 'đầu';
+          break;
+        case 'torso':
+          partNameVI = 'thân';
+          break;
+        case 'leftArm':
+          partNameVI = 'tay trái';
+          break;
+        case 'rightArm':
+          partNameVI = 'tay phải';
+          break;
+        case 'leftLeg':
+          partNameVI = 'chân trái';
+          break;
+        case 'rightLeg':
+          partNameVI = 'chân phải';
+          break;
+        default:
+          partNameVI = part;
       }
+      onChoice(`Tấn công ${partNameVI} của ${enemy.name}`);
+    }
   };
-
-  const handleCraft = (recipe) => {
+  const handleCraft = recipe => {
     setIsCraftingOpen(false);
     onChoice(`[HÀNH ĐỘNG] Chế tạo ${recipe.name}.`);
   };
-
-  const handleSanctuaryAction = (action) => {
+  const handleSanctuaryAction = action => {
     setIsCharacterDetailsOpen(false);
     onChoice(action);
   };
-  
-  const handlePathSelection = (path) => {
-      if(markLevelUpEvent) {
-        onChoice(`[LÊN CẤP ẤN KÝ] Tôi chọn Con Đường ${path} cho ${markLevelUpEvent.deity}.`);
-        setMarkLevelUpEvent(null);
-      }
+  const handlePathSelection = path => {
+    if (markLevelUpEvent) {
+      onChoice(`[LÊN CẤP ẤN KÝ] Tôi chọn Con Đường ${path} cho ${markLevelUpEvent.deity}.`);
+      setMarkLevelUpEvent(null);
+    }
   };
-
   const sanityPercentage = useMemo(() => {
-    return (character.stats.san / character.stats.maxSan) * 100;
+    return character.stats.san / character.stats.maxSan * 100;
   }, [character.stats.san, character.stats.maxSan]);
-
   const screenEffectStyle = {
     '--sanity-factor': (100 - sanityPercentage) / 100,
     '--shake-intensity': sanityPercentage < 40 ? `${Math.min(2, (40 - sanityPercentage) / 20)}px` : '0px',
-    '--vignette-opacity': sanityPercentage < 50 ? `${(50 - sanityPercentage) / 100}` : '0',
+    '--vignette-opacity': sanityPercentage < 50 ? `${(50 - sanityPercentage) / 100}` : '0'
   };
-
   const SanityEffects = () => {
     if (sanityPercentage >= 50) return null;
-    return (
-      <>
-        <div className="sanity-vignette" style={screenEffectStyle}></div>
-        {sanityPercentage < 25 && <div className="sanity-noise"></div>}
-      </>
-    );
+    return React.createElement(React.Fragment, null, React.createElement("div", {
+      className: "sanity-vignette",
+      style: screenEffectStyle
+    }), sanityPercentage < 25 && React.createElement("div", {
+      className: "sanity-noise",
+      style: screenEffectStyle
+    }));
   };
-  
   const inCombat = scene.enemies && scene.enemies.length > 0;
-  
-  const getSkillDisabledReason = (skill) => {
+  const getSkillDisabledReason = skill => {
     if (character.godMode) return null;
     if (skill.currentCooldown > 0) return `Hồi chiêu: ${skill.currentCooldown} lượt`;
     if (character.stats[skill.costType] < skill.costAmount) return `Không đủ ${skill.costType.toUpperCase()}`;
     return null;
-  }
-
-  return (
-    <>
-      <SanityEffects />
-      {isJournalOpen && <Journal journal={character.journal} onClose={() => setIsJournalOpen(false)} />}
-      {isCraftingOpen && <CraftingModal character={character} allRecipes={RECIPES} onCraft={handleCraft} onClose={() => setIsCraftingOpen(false)} />}
-      {isCharacterDetailsOpen && <CharacterDetailsModal character={character} onSanctuaryAction={handleSanctuaryAction} onClose={() => setIsCharacterDetailsOpen(false)} />}
-      {markLevelUpEvent && <MarkLevelUpModal event={markLevelUpEvent} onSelectPath={handlePathSelection} />}
-
-      <div 
-        className={`w-full max-w-6xl mx-auto flex flex-col md:flex-row gap-8 p-6 sm:p-8 bg-black/60 border border-gray-800 shadow-lg shadow-red-900/20 rounded-lg backdrop-blur-sm relative overflow-hidden ${sanityPercentage < 40 ? 'sanity-shake' : ''}`}
-        style={screenEffectStyle}
-      >
-        <aside className="w-full md:w-1/3 lg:w-1/4 flex flex-col gap-4">
-            <div className="text-center">
-              <h3 className="text-xl font-bold text-red-500">{character.name}</h3>
-              {character.godMode && <div className="mt-1 text-sm font-bold text-yellow-400 border border-yellow-500 bg-yellow-900/30 py-1 rounded-md">Ý CHÍ SÁNG THẾ</div>}
-            </div>
-            
-            <SidePanelAccordion title="Trạng Thái Cơ Thể" initialOpen={true}>
-              <BodyStatus bodyParts={character.bodyParts} />
-            </SidePanelAccordion>
-            
-            {character.companions && character.companions.length > 0 && (
-              <SidePanelAccordion title="Đồng Hành & Đệ Tử" initialOpen={true}>
-                <div className="flex flex-col gap-3">
-                    {character.companions.map((comp, index) => (
-                        <CompanionDisplay key={`${comp.name}-${index}`} companion={comp} />
-                    ))}
-                </div>
-              </SidePanelAccordion>
-            )}
-
-            <SidePanelAccordion title="Chỉ Số Sống" initialOpen={true}>
-              <div className="flex flex-col gap-3">
-                <StatDisplay label="MÁU" value={character.stats.hp} maxValue={character.stats.maxHp} color="bg-red-600" />
-                <StatDisplay label="TINH THẦN" value={character.stats.san} maxValue={character.stats.maxSan} color="bg-purple-600" />
-                <StatDisplay label="THỂ LỰC" value={character.stats.stamina} maxValue={character.stats.maxStamina} color="bg-green-600" />
-                <StatDisplay label="MANA" value={character.stats.mana} maxValue={character.stats.maxMana} color="bg-blue-600" />
-              </div>
-            </SidePanelAccordion>
-
-            <SidePanelAccordion title="Nhu Yếu Phẩm">
-               <div className="flex flex-col gap-3">
-                <StatDisplay label="CƠN ĐÓI" value={character.hunger} maxValue={character.maxHunger} color="bg-yellow-700" />
-                <StatDisplay label="CƠN KHÁT" value={character.thirst} maxValue={character.maxThirst} color="bg-cyan-600" />
-              </div>
-            </SidePanelAccordion>
-
-            <SidePanelAccordion title="Thuộc Tính">
-               <div className="grid grid-cols-3 gap-2 text-center text-sm">
-                  <div><span className="text-gray-400">TẤN CÔNG</span><p className="font-bold text-lg text-white">{character.stats.attack}</p></div>
-                  <div><span className="text-gray-400">PHÒNG THỦ</span><p className="font-bold text-lg text-white">{character.stats.defense}</p></div>
-                  <div><span className="text-gray-400">TỐC ĐỘ</span><p className="font-bold text-lg text-white">{character.stats.speed}</p></div>
-               </div>
-            </SidePanelAccordion>
-        </aside>
-        <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col">
-          {inCombat && (
-             <div className="mb-4">
-                <h3 className="text-2xl font-bold text-red-700 border-b-2 border-red-800/50 pb-2 mb-4">KẺ THÙ</h3>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  {scene.enemies?.map(enemy => <EnemyDisplay key={enemy.id} enemy={enemy} onTargetPart={handleTargetPart} />)}
-                </div>
-            </div>
-          )}
-
-          <main className="flex-grow mb-6 min-h-[150px]">
-             <h3 className="text-2xl font-bold text-gray-400 border-b-2 border-gray-700/50 pb-2 mb-4">DIỄN BIẾN</h3>
-            {loading ? (
-              <LoadingSpinner />
-            ) : (
-              <p className="text-gray-300 text-lg leading-relaxed whitespace-pre-wrap" style={{ textShadow: `0 0 calc(var(--sanity-factor) * 5px) rgba(255, 100, 100, 0.5)` }}>
-                {scene.description}
-              </p>
-            )}
-          </main>
-
-          <footer className="w-full mt-auto">
-            {!loading && !markLevelUpEvent && (
-              <>
-                {inCombat && character.skills.length > 0 && (
-                  <div className="mb-4">
-                      <h4 className="text-lg font-bold text-yellow-500 mb-2">Kỹ năng</h4>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {character.skills.map(skill => {
-                              const disabledReason = getSkillDisabledReason(skill);
-                              const title = character.godMode ? `${skill.description} (Vô hạn trong God Mode)` : (disabledReason || skill.description);
-                              return (
-                                  <button
-                                      key={skill.id}
-                                      onClick={() => onChoice(`Sử dụng kỹ năng: ${skill.name}`)}
-                                      disabled={!!disabledReason}
-                                      title={title}
-                                      className="w-full bg-yellow-900/30 border border-yellow-800 text-yellow-300 font-bold py-3 px-4 rounded-sm text-left transition-all duration-200 hover:bg-yellow-800/70 hover:border-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-800/40 disabled:border-gray-700 disabled:text-gray-500 flex justify-between items-center"
-                                  >
-                                      <span>&gt; {skill.name}</span>
-                                      <span className="text-sm font-normal">
-                                          {disabledReason || (character.godMode ? 'MIỄN PHÍ' : `${skill.costAmount} ${skill.costType.toUpperCase()}`)}
-                                      </span>
-                                  </button>
-                              )
-                          })}
-                      </div>
-                  </div>
-                )}
-                 
-                <h4 className="text-lg font-bold text-gray-300 mb-2">Hành động</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {scene.choices.map((choice, index) => {
-                    const hitChanceEntry = scene.hitChances?.find(hc => hc.choice === choice);
-                    const hitChance = hitChanceEntry?.chance;
-                    return (
-                      <button
-                        key={index}
-                        onClick={() => onChoice(choice)}
-                        disabled={loading}
-                        className="w-full bg-gray-800/50 border border-gray-700 text-gray-300 font-bold py-3 px-4 rounded-sm text-left transition-all duration-200 hover:bg-gray-700 hover:border-red-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex justify-between items-center"
-                      >
-                        <span>&gt; {choice}</span>
-                        {hitChance !== undefined && (
-                          <span className="text-sm font-normal text-yellow-400">{hitChance}%</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <div className="my-4 flex items-center gap-4">
-                  <div className="flex-grow border-t border-gray-700"></div>
-                  <span className="flex-shrink text-gray-500 text-sm">hoặc</span>
-                  <div className="flex-grow border-t border-gray-700"></div>
-                </div>
-                
-                <form onSubmit={handleCustomActionSubmit} className="flex gap-2 w-full">
-                    <input
-                        type="text"
-                        value={customAction}
-                        onChange={(e) => setCustomAction(e.target.value)}
-                        placeholder="Làm gì tiếp theo...?"
-                        disabled={loading}
-                        className="flex-grow bg-gray-900/70 border border-gray-700 text-gray-300 py-3 px-4 rounded-sm focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600 placeholder-gray-500 disabled:opacity-50"
-                    />
-                    <button
-                        type="submit"
-                        disabled={loading || !customAction.trim()}
-                        className="flex-shrink-0 bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-6 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:border-gray-600 disabled:text-gray-500 disabled:hover:bg-transparent"
-                    >
-                        Gửi
-                    </button>
-                </form>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4">
-                    <button
-                        onClick={() => setIsCharacterDetailsOpen(true)}
-                        disabled={loading}
-                        className="w-full bg-transparent border-2 border-cyan-500 text-cyan-400 font-bold py-3 px-4 rounded-sm hover:bg-cyan-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Nhân Vật
-                    </button>
-                    <button
-                        onClick={() => setIsCraftingOpen(true)}
-                        disabled={loading || inCombat}
-                        title={inCombat ? "Không thể chế tạo trong chiến đấu" : "Mở giao diện chế tạo"}
-                        className="w-full bg-transparent border-2 border-green-500 text-green-400 font-bold py-3 px-4 rounded-sm hover:bg-green-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Chế Tạo
-                    </button>
-                     <button
-                        onClick={() => onChoice('[HÀNH ĐỘNG] Quan sát xung quanh thật kỹ lưỡng.')}
-                        disabled={loading || inCombat}
-                        title={inCombat ? "Không thể quan sát trong chiến đấu" : "Nhìn kỹ môi trường xung quanh"}
-                        className="w-full bg-transparent border-2 border-indigo-500 text-indigo-400 font-bold py-3 px-4 rounded-sm hover:bg-indigo-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Quan Sát
-                    </button>
-                    <button
-                        onClick={() => setIsJournalOpen(true)}
-                        disabled={loading}
-                        className="w-full bg-transparent border-2 border-blue-500 text-blue-400 font-bold py-3 px-4 rounded-sm hover:bg-blue-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        Nhật Ký
-                    </button>
-                </div>
-              </>
-            )}
-          </footer>
-        </div>
-      </div>
-    </>
-  );
+  };
+  return React.createElement(React.Fragment, null, React.createElement(SanityEffects, null), isJournalOpen && React.createElement(Journal, {
+    journal: character.journal,
+    onClose: () => setIsJournalOpen(false)
+  }), isCraftingOpen && React.createElement(CraftingModal, {
+    character: character,
+    allRecipes: RECIPES,
+    onCraft: handleCraft,
+    onClose: () => setIsCraftingOpen(false)
+  }), isCharacterDetailsOpen && React.createElement(CharacterDetailsModal, {
+    character: character,
+    onSanctuaryAction: handleSanctuaryAction,
+    onClose: () => setIsCharacterDetailsOpen(false)
+  }), markLevelUpEvent && React.createElement(MarkLevelUpModal, {
+    event: markLevelUpEvent,
+    onSelectPath: handlePathSelection
+  }), React.createElement("div", {
+    className: `w-full max-w-7xl mx-auto flex flex-col md:flex-row gap-8 p-4 sm:p-6 bg-black/60 border border-gray-800 shadow-lg shadow-red-900/20 rounded-lg backdrop-blur-sm relative overflow-hidden ${sanityPercentage < 40 ? 'sanity-shake' : ''}`,
+    style: screenEffectStyle
+  }, React.createElement("aside", {
+    className: "w-full md:w-1/3 lg:w-1/4 flex flex-col gap-4"
+  }, React.createElement("div", {
+    className: "text-center p-2 bg-black/30 rounded-lg border border-gray-700"
+  }, React.createElement("h3", {
+    className: "text-xl font-bold text-red-500"
+  }, character.name), character.godMode && React.createElement("div", {
+    className: "mt-1 text-sm font-bold text-yellow-400 border border-yellow-500 bg-yellow-900/30 py-1 rounded-md"
+  }, "Ý Chí Sáng Thế")), React.createElement(SidePanelAccordion, {
+    title: "Trạng Thái Cơ Thể",
+    initialOpen: true
+  }, React.createElement(BodyStatus, {
+    bodyParts: character.bodyParts
+  })), character.companions && character.companions.length > 0 && React.createElement(SidePanelAccordion, {
+    title: "Đồng Hành & Đệ Tử",
+    initialOpen: true
+  }, React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, character.companions.map((comp, index) => React.createElement(CompanionDisplay, {
+    key: `${comp.name}-${index}`,
+    companion: comp
+  })))), React.createElement(SidePanelAccordion, {
+    title: "Chỉ Số Sống",
+    initialOpen: true
+  }, React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, React.createElement(StatDisplay, {
+    label: "MÁU",
+    value: character.stats.hp,
+    maxValue: character.stats.maxHp,
+    color: "bg-red-600"
+  }), React.createElement(StatDisplay, {
+    label: "TINH THẦN",
+    value: character.stats.san,
+    maxValue: character.stats.maxSan,
+    color: "bg-purple-600"
+  }), React.createElement(StatDisplay, {
+    label: "THỂ LỰC",
+    value: character.stats.stamina,
+    maxValue: character.stats.maxStamina,
+    color: "bg-green-600"
+  }), React.createElement(StatDisplay, {
+    label: "MANA",
+    value: character.stats.mana,
+    maxValue: character.stats.maxMana,
+    color: "bg-blue-600"
+  }))), React.createElement(SidePanelAccordion, {
+    title: "Nhu Yếu Phẩm"
+  }, React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, React.createElement(StatDisplay, {
+    label: "CƠN ĐÓI",
+    value: character.hunger,
+    maxValue: character.maxHunger,
+    color: "bg-yellow-700"
+  }), React.createElement(StatDisplay, {
+    label: "CƠN KHÁT",
+    value: character.thirst,
+    maxValue: character.maxThirst,
+    color: "bg-cyan-600"
+  }))), React.createElement(SidePanelAccordion, {
+    title: "Thuộc Tính"
+  }, React.createElement("div", {
+    className: "grid grid-cols-3 gap-2 text-center text-sm"
+  }, React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400"
+  }, "TẤN CÔNG"), React.createElement("p", {
+    className: "font-bold text-lg text-white"
+  }, character.stats.attack)), React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400"
+  }, "PHÒNG THỦ"), React.createElement("p", {
+    className: "font-bold text-lg text-white"
+  }, character.stats.defense)), React.createElement("div", null, React.createElement("span", {
+    className: "text-gray-400"
+  }, "TỐC ĐỘ"), React.createElement("p", {
+    className: "font-bold text-lg text-white"
+  }, character.stats.speed))))), React.createElement("div", {
+    className: "w-full md:w-2/3 lg:w-3/4 flex flex-col max-h-[85vh]"
+  }, inCombat && React.createElement("div", {
+    className: "mb-4 flex-shrink-0"
+  }, React.createElement("h3", {
+    className: "text-2xl font-bold text-red-700 border-b-2 border-red-800/50 pb-2 mb-4"
+  }, "KẺ THÙ"), React.createElement("div", {
+    className: "grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[40vh] overflow-y-auto pr-2"
+  }, scene.enemies?.map(enemy => React.createElement(EnemyDisplay, {
+    key: enemy.id,
+    enemy: enemy,
+    onTargetPart: handleTargetPart
+  })))), React.createElement("main", {
+    ref: mainContentRef,
+    className: "flex-grow mb-6 min-h-[150px] overflow-y-auto pr-2"
+  }, React.createElement("h3", {
+    className: "text-2xl font-bold text-gray-400 border-b-2 border-gray-700/50 pb-2 mb-4"
+  }, "DIỄN BIẾN"), loading ? React.createElement(LoadingSpinner, null) : React.createElement("p", {
+    className: "text-gray-300 text-lg leading-relaxed whitespace-pre-wrap",
+    style: {
+      textShadow: `0 0 calc(var(--sanity-factor) * 5px) rgba(255, 100, 100, 0.5)`
+    }
+  }, scene.description)), React.createElement("footer", {
+    className: "w-full mt-auto flex-shrink-0"
+  }, !loading && !markLevelUpEvent && React.createElement(React.Fragment, null, inCombat && character.skills.length > 0 && React.createElement("div", {
+    className: "mb-4"
+  }, React.createElement("h4", {
+    className: "text-lg font-bold text-yellow-500 mb-2"
+  }, "Kỹ năng"), React.createElement("div", {
+    className: "grid grid-cols-1 sm:grid-cols-2 gap-4"
+  }, character.skills.map(skill => {
+    const disabledReason = getSkillDisabledReason(skill);
+    const title = character.godMode ? `${skill.description} (Vô hạn trong God Mode)` : disabledReason || skill.description;
+    return React.createElement("button", {
+      key: skill.id,
+      onClick: () => onChoice(`Sử dụng kỹ năng: ${skill.name}`),
+      disabled: !!disabledReason,
+      title: title,
+      className: "w-full bg-yellow-900/30 border border-yellow-800 text-yellow-300 font-bold py-3 px-4 rounded-sm text-left transition-all duration-200 hover:bg-yellow-800/70 hover:border-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-gray-800/40 disabled:border-gray-700 disabled:text-gray-500 flex justify-between items-center"
+    }, React.createElement("span", null, "> ", skill.name), React.createElement("span", {
+      className: "text-sm font-normal"
+    }, disabledReason || (character.godMode ? 'MIỄN PHÍ' : `${skill.costAmount} ${skill.costType.toUpperCase()}`)));
+  }))), React.createElement("h4", {
+    className: "text-lg font-bold text-gray-300 mb-2"
+  }, "Hành động"), React.createElement("div", {
+    className: "grid grid-cols-1 sm:grid-cols-2 gap-4"
+  }, scene.choices.map((choice, index) => {
+    const hitChanceEntry = scene.hitChances?.find(hc => hc.choice === choice);
+    const hitChance = hitChanceEntry?.chance;
+    return React.createElement("button", {
+      key: index,
+      onClick: () => onChoice(choice),
+      disabled: loading,
+      className: "w-full bg-gray-800/50 border border-gray-700 text-gray-300 font-bold py-3 px-4 rounded-sm text-left transition-all duration-200 hover:bg-gray-700 hover:border-red-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex justify-between items-center"
+    }, React.createElement("span", null, "> ", choice), hitChance !== undefined && React.createElement("span", {
+      className: "text-sm font-normal text-yellow-400"
+    }, hitChance, "%"));
+  })), React.createElement("div", {
+    className: "my-4 flex items-center gap-4"
+  }, React.createElement("div", {
+    className: "flex-grow border-t border-gray-700"
+  }), React.createElement("span", {
+    className: "flex-shrink text-gray-500 text-sm"
+  }, "hoặc"), React.createElement("div", {
+    className: "flex-grow border-t border-gray-700"
+  })), React.createElement("form", {
+    onSubmit: handleCustomActionSubmit,
+    className: "flex gap-2 w-full"
+  }, React.createElement("input", {
+    type: "text",
+    value: customAction,
+    onChange: e => setCustomAction(e.target.value),
+    placeholder: "Làm gì tiếp theo...?",
+    disabled: loading,
+    className: "flex-grow bg-gray-900/70 border border-gray-700 text-gray-300 py-3 px-4 rounded-sm focus:outline-none focus:ring-2 focus:ring-red-600 focus:border-red-600 placeholder-gray-500 disabled:opacity-50"
+  }), React.createElement("button", {
+    type: "submit",
+    disabled: loading || !customAction.trim(),
+    className: "flex-shrink-0 bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-6 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:border-gray-600 disabled:text-gray-500 disabled:hover:bg-transparent"
+  }, "Gửi")), React.createElement("div", {
+    className: "grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4"
+  }, React.createElement("button", {
+    onClick: () => setIsCharacterDetailsOpen(true),
+    disabled: loading,
+    className: "w-full bg-transparent border-2 border-cyan-500 text-cyan-400 font-bold py-3 px-4 rounded-sm hover:bg-cyan-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+  }, "Nhân Vật"), React.createElement("button", {
+    onClick: () => setIsCraftingOpen(true),
+    disabled: loading || inCombat,
+    title: inCombat ? "Không thể chế tạo trong chiến đấu" : "Mở giao diện chế tạo",
+    className: "w-full bg-transparent border-2 border-green-500 text-green-400 font-bold py-3 px-4 rounded-sm hover:bg-green-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+  }, "Chế Tạo"), React.createElement("button", {
+    onClick: () => onChoice('[HÀNH ĐỘNG] Quan sát xung quanh thật kỹ lưỡng.'),
+    disabled: loading || inCombat,
+    title: inCombat ? "Không thể quan sát trong chiến đấu" : "Nhìn kỹ môi trường xung quanh",
+    className: "w-full bg-transparent border-2 border-indigo-500 text-indigo-400 font-bold py-3 px-4 rounded-sm hover:bg-indigo-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+  }, "Quan Sát"), React.createElement("button", {
+    onClick: () => setIsJournalOpen(true),
+    disabled: loading,
+    className: "w-full bg-transparent border-2 border-blue-500 text-blue-400 font-bold py-3 px-4 rounded-sm hover:bg-blue-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+  }, "Nhật Ký")))))));
 };
-
 
 const App = () => {
   const [gameState, setGameState] = useState('START_SCREEN');
@@ -2424,13 +2458,11 @@ const App = () => {
   const [enableGore, setEnableGore] = useState(true);
   const [creationMode, setCreationMode] = useState('standard');
   const [isAiManagerOpen, setIsAiManagerOpen] = useState(false);
-
   const WORLD_EVENT_TURN_INTERVAL = 5;
-  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v5';
-  const SETTINGS_KEY = 'echoes_of_ruin_settings';
+  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v6'; // Updated version key
+  const SETTINGS_KEY = 'echoes_of_ruin_settings_v1';
   const HUNGER_PER_TURN = 2;
   const THIRST_PER_TURN = 3;
-
   useEffect(() => {
     try {
       const savedGame = localStorage.getItem(SAVE_GAME_KEY);
@@ -2439,7 +2471,10 @@ const App = () => {
       }
       const savedSettings = localStorage.getItem(SETTINGS_KEY);
       if (savedSettings) {
-        setEnableGore(JSON.parse(savedSettings).enableGore);
+        const parsedSettings = JSON.parse(savedSettings);
+        if (typeof parsedSettings.enableGore === 'boolean') {
+          setEnableGore(parsedSettings.enableGore);
+        }
       }
     } catch (error) {
       console.error("Failed to check for saved game/settings:", error);
@@ -2447,45 +2482,55 @@ const App = () => {
       setHasSave(false);
     }
   }, []);
-
   useEffect(() => {
     if (character && gameState === 'PLAYING') {
       try {
-        const gameStateToSave = { character, turnCount, currentScene };
+        const gameStateToSave = {
+          character,
+          turnCount,
+          currentScene
+        };
         localStorage.setItem(SAVE_GAME_KEY, JSON.stringify(gameStateToSave));
         setHasSave(true);
       } catch (error) {
         console.error("Failed to save game:", error);
+        // Don't crash the app, but notify user if possible.
       }
     }
   }, [character, turnCount, gameState, currentScene]);
-  
-  const handleGoreToggle = (enabled) => {
-      setEnableGore(enabled);
-      try {
-          localStorage.setItem(SETTINGS_KEY, JSON.stringify({ enableGore: enabled }));
-      } catch (error) {
-          console.error("Failed to save settings:", error);
-      }
-  }
-
+  const handleGoreToggle = enabled => {
+    setEnableGore(enabled);
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        enableGore: enabled
+      }));
+    } catch (error) {
+      console.error("Failed to save settings:", error);
+    }
+  };
   const handleGameOver = useCallback((reason, finalCharacterState) => {
     setGameOverReason(reason);
     setGameState('GAME_OVER');
-    
-    if (finalCharacterState.difficulty.permadeath) {
+    if (finalCharacterState?.difficulty?.permadeath) {
       localStorage.removeItem(SAVE_GAME_KEY);
       setHasSave(false);
     }
   }, []);
-
   const processScene = useCallback((scene, currentCharacter) => {
-    let charToUpdate = { ...currentCharacter };
-
-    if (scene.updatedCompanions) {
-        charToUpdate.companions = scene.updatedCompanions;
+    if (!scene || !currentCharacter) {
+      console.error("ProcessScene called with invalid scene or character", {
+        scene,
+        currentCharacter
+      });
+      setLoading(false);
+      // Potentially set an error state on screen
+      return;
     }
-
+    let charToUpdate = { ...currentCharacter
+    };
+    if (scene.updatedCompanions) {
+      charToUpdate.companions = scene.updatedCompanions;
+    }
     charToUpdate.stats = applyStatChanges(charToUpdate.stats, scene.statChanges);
     charToUpdate.inventory = applyInventoryChanges(charToUpdate.inventory, scene.inventoryChanges);
     charToUpdate.bodyParts = applyBodyPartChanges(charToUpdate.bodyParts, scene.bodyPartChanges);
@@ -2494,130 +2539,109 @@ const App = () => {
     charToUpdate.faith = applyFaithUpdates(charToUpdate.faith, scene.updatedFaith);
     charToUpdate.sanctuary = applySanctuaryUpdate(charToUpdate.sanctuary, scene.updatedSanctuary);
     if (scene.updatedSkills) charToUpdate.skills = scene.updatedSkills;
-
-    const { updatedIds, learnedRecipeNames } = learnNewRecipes(charToUpdate.knownRecipeIds, scene.newlyLearnedRecipes);
+    const {
+      updatedIds,
+      learnedRecipeNames
+    } = learnNewRecipes(charToUpdate.knownRecipeIds, scene.newlyLearnedRecipes);
     charToUpdate.knownRecipeIds = updatedIds;
-
-    const { updatedJournal, wasUpdated: journalWasUpdated } = applyJournalUpdates(charToUpdate.journal, scene.journalUpdates);
+    const {
+      updatedJournal,
+      wasUpdated: journalWasUpdated
+    } = applyJournalUpdates(charToUpdate.journal, scene.journalUpdates);
     if (journalWasUpdated) {
-        charToUpdate.journal = updatedJournal;
+      charToUpdate.journal = updatedJournal;
     }
-
     if (scene.tamingResult?.success && scene.tamingResult.companion) {
-        charToUpdate.companions = [...charToUpdate.companions, scene.tamingResult.companion];
+      charToUpdate.companions = [...charToUpdate.companions, scene.tamingResult.companion];
     }
     if (scene.reanimationResult?.success && scene.reanimationResult.companion) {
-        charToUpdate.companions = [...charToUpdate.companions, scene.reanimationResult.companion];
+      charToUpdate.companions = [...charToUpdate.companions, scene.reanimationResult.companion];
     }
-    
     let notificationText = assembleNotifications(scene, learnedRecipeNames, journalWasUpdated);
-    
     if (scene.tamingResult) {
-        const tamingNotif = scene.tamingResult.success
-            ? `[ Bạn đã thuần hóa thành công ${scene.tamingResult.creatureName}! Nó đã gia nhập đội của bạn. ]`
-            : `[ Thuần hóa ${scene.tamingResult.creatureName} thất bại. ]`;
-        notificationText = `${tamingNotif}\n\n${notificationText}`;
+      const tamingNotif = scene.tamingResult.success ? `[ Bạn đã thuần hóa thành công ${scene.tamingResult.creatureName}! Nó đã gia nhập đội của bạn. ]` : `[ Thuần hóa ${scene.tamingResult.creatureName} thất bại. ]`;
+      notificationText = `${tamingNotif}\n\n${notificationText}`;
     }
     if (scene.reanimationResult) {
-        const reanimationNotif = `[ ${scene.reanimationResult.message} ]`;
-        notificationText = `${reanimationNotif}\n\n${notificationText}`;
+      const reanimationNotif = `[ ${scene.reanimationResult.message} ]`;
+      notificationText = `${reanimationNotif}\n\n${notificationText}`;
     }
-    
     const sceneDescription = notificationText ? `${notificationText.trim()}\n\n${scene.description}` : scene.description;
-    
-    const { clampedStats, clampedHunger, clampedThirst } = clampStats(
-      charToUpdate.stats, charToUpdate.hunger, charToUpdate.thirst,
-      charToUpdate.maxHunger, charToUpdate.maxThirst
-    );
+    const {
+      clampedStats,
+      clampedHunger,
+      clampedThirst
+    } = clampStats(charToUpdate.stats, charToUpdate.hunger, charToUpdate.thirst, charToUpdate.maxHunger, charToUpdate.maxThirst);
     charToUpdate.stats = clampedStats;
     charToUpdate.hunger = clampedHunger;
     charToUpdate.thirst = clampedThirst;
-
     charToUpdate = applyGodMode(charToUpdate);
-    
-    const finalScene = {...scene, description: sceneDescription};
-
+    const finalScene = { ...scene,
+      description: sceneDescription
+    };
     setCharacter(charToUpdate);
     setCurrentScene(finalScene);
-
-    if (finalScene.gameOver || (!charToUpdate.godMode && (charToUpdate.stats.hp <= 0 || charToUpdate.stats.san <= 0))) {
+    if (finalScene.gameOver || !charToUpdate.godMode && (charToUpdate.stats.hp <= 0 || charToUpdate.stats.san <= 0)) {
       let reason = finalScene.reason || '';
       if (charToUpdate.stats.hp <= 0 && !reason) reason = "Cơ thể bạn kiệt sức, đổ gục thành một đống máu me trên nền đá lạnh lẽo.";
       if (charToUpdate.stats.san <= 0 && !reason) reason = "Tâm trí bạn vỡ vụn, để lại bạn một cái vỏ rỗng tuếch, lạc lối trong những kinh hoàng bạn đã chứng kiến.";
-      
       handleGameOver(reason, charToUpdate);
     }
-    
     setLoading(false);
   }, [handleGameOver]);
-  
-
-  const handleChoice = useCallback(async (choice) => {
+  const handleChoice = useCallback(async choice => {
     if (!character || !currentScene) return;
     setLoading(true);
-    
     const newTurnCount = turnCount + 1;
     setTurnCount(newTurnCount);
-    
-    let updatedCharacter = { ...character };
+    let updatedCharacter = { ...character
+    };
     let turnInfo = 'Bắt đầu lượt mới. ';
-
-    updatedCharacter.skills = updatedCharacter.skills.map(skill => ({
-      ...skill,
-      currentCooldown: Math.max(0, skill.currentCooldown - 1),
+    updatedCharacter.skills = updatedCharacter.skills.map(skill => ({ ...skill,
+      currentCooldown: Math.max(0, skill.currentCooldown - 1)
     }));
     turnInfo += 'Một vài kỹ năng đã được hồi lại. ';
-
     const inCombat = currentScene.enemies && currentScene.enemies.length > 0;
     if (!inCombat && !updatedCharacter.godMode) {
-        updatedCharacter.hunger = Math.max(0, updatedCharacter.hunger - HUNGER_PER_TURN);
-        updatedCharacter.thirst = Math.max(0, updatedCharacter.thirst - THIRST_PER_TURN);
+      updatedCharacter.hunger = Math.max(0, updatedCharacter.hunger - HUNGER_PER_TURN);
+      updatedCharacter.thirst = Math.max(0, updatedCharacter.thirst - THIRST_PER_TURN);
     }
-
     if (updatedCharacter.hunger === 0 && !updatedCharacter.godMode) {
-        updatedCharacter.stats.hp = Math.max(0, updatedCharacter.stats.hp - 1);
-        turnInfo += 'Cơn đói đang gặm nhấm bạn từ bên trong. ';
+      updatedCharacter.stats.hp = Math.max(1, updatedCharacter.stats.hp - 1); // Don't let hunger kill, just weaken
+      turnInfo += 'Cơn đói đang gặm nhấm bạn từ bên trong. ';
     }
-     if (updatedCharacter.thirst === 0 && !updatedCharacter.godMode) {
-        updatedCharacter.stats.hp = Math.max(0, updatedCharacter.stats.hp - 2);
-        turnInfo += 'Cổ họng bạn khô rát vì thiếu nước. ';
+    if (updatedCharacter.thirst === 0 && !updatedCharacter.godMode) {
+      updatedCharacter.stats.hp = Math.max(1, updatedCharacter.stats.hp - 2); // Thirst is more dangerous
+      turnInfo += 'Cổ họng bạn khô rát vì thiếu nước. ';
     }
-
     let actionForGemini = choice;
     if (newTurnCount > 0 && newTurnCount % WORLD_EVENT_TURN_INTERVAL === 0 && !inCombat) {
-        actionForGemini += "\n\n[CHỈ THỊ QUẢN TRÒ: Đã đến lúc cho một SỰ KIỆN THẾ GIỚI. Hãy đưa một yếu tố bất ngờ, đáng lo ngại hoặc kỳ lạ vào cảnh này.]";
+      actionForGemini += "\n\n[CHỈ THỊ QUẢN TRÒ: Đã đến lúc cho một SỰ KIỆN THẾ GIỚI. Hãy đưa một yếu tố bất ngờ, đáng lo ngại hoặc kỳ lạ vào cảnh này.]";
     }
-
     const scene = await generateScene(updatedCharacter, actionForGemini, turnInfo, currentScene.enemies, enableGore);
     processScene(scene, updatedCharacter);
   }, [character, currentScene, processScene, turnCount, enableGore]);
-  
-  const startGame = useCallback(async (newCharacter) => {
+  const startGame = useCallback(async newCharacter => {
     setLoading(true);
     setCharacter(newCharacter);
     setTurnCount(0);
     setGameState('PLAYING');
-    const firstAction = newCharacter.customScenario 
-        ? `[HÀNH TRÌNH TÙY CHỈNH]: ${newCharacter.customScenario}`
-        : "BẮT ĐẦU CUỘC PHIÊU LƯU: Nhân vật đặt những bước chân đầu tiên vào phế tích.";
-    const firstScene = await generateScene(newCharacter, firstAction, '', [], enableGore);
+    const firstAction = newCharacter.customScenario ? `[HÀNH TRÌNH TÙY CHỈNH]: ${newCharacter.customScenario}` : "BẮT ĐẦU CUỘC PHIÊU LƯU: Nhân vật đặt những bước chân đầu tiên vào phế tích.";
+    const firstScene = await generateScene(newCharacter, firstAction, 'Bắt đầu một hành trình mới.', [], enableGore);
     processScene(firstScene, newCharacter);
   }, [processScene, enableGore]);
-
   const handleStartCombatSandbox = useCallback(async () => {
     setLoading(true);
     const origin = ORIGINS.find(o => o.name === "Hiệp Sĩ Sa Ngã");
-    
     const weaponProficiencies = ALL_WEAPON_PROFICIENCIES.reduce((acc, profName) => {
-        const isOriginProficiency = profName === origin.weaponProficiency;
-        acc[profName] = {
-            level: isOriginProficiency ? 5 : 1,
-            xp: 0,
-            xpToNextLevel: isOriginProficiency ? 500 : 100,
-        };
-        return acc;
+      const isOriginProficiency = profName === origin.weaponProficiency;
+      acc[profName] = {
+        level: isOriginProficiency ? 5 : 1,
+        xp: 0,
+        xpToNextLevel: isOriginProficiency ? 500 : 100
+      };
+      return acc;
     }, {});
-
     const defaultCharacter = {
       name: "Chiến Binh Thử Nghiệm",
       gender: "Khác",
@@ -2625,20 +2649,69 @@ const App = () => {
       difficulty: DIFFICULTIES[0],
       origin: origin,
       talent: origin.talents[0],
-      personality: { name: "Dũng cảm", description: "Không bao giờ lùi bước", effect: ""},
-      stats: { hp: 120, maxHp: 120, san: 100, maxSan: 100, mana: 50, maxMana: 50, stamina: 120, maxStamina: 120, attack: 10, defense: 10, speed: 5, charisma: 5 },
-      bodyParts: { head: 'Khỏe Mạnh', torso: 'Khỏe Mạnh', leftArm: 'Khỏe Mạnh', rightArm: 'Khỏe Mạnh', leftLeg: 'Khỏe Mạnh', rightLeg: 'Khỏe Mạnh' },
-      hunger: 100, maxHunger: 100, thirst: 100, maxThirst: 100,
-      reputation: 0, 
-      inventory: origin.startingEquipment,
-      skills: origin.startingSkills.map(s => ({...s, currentCooldown: 0})),
+      personality: {
+        name: "Dũng cảm",
+        description: "Không bao giờ lùi bước",
+        effect: ""
+      },
+      stats: {
+        hp: 150,
+        maxHp: 150,
+        san: 100,
+        maxSan: 100,
+        mana: 50,
+        maxMana: 50,
+        stamina: 120,
+        maxStamina: 120,
+        attack: 15,
+        defense: 12,
+        speed: 7,
+        charisma: 5
+      },
+      bodyParts: {
+        head: 'Khỏe Mạnh',
+        torso: 'Khỏe Mạnh',
+        leftArm: 'Khỏe Mạnh',
+        rightArm: 'Khỏe Mạnh',
+        leftLeg: 'Khỏe Mạnh',
+        rightLeg: 'Khỏe Mạnh'
+      },
+      hunger: 100,
+      maxHunger: 100,
+      thirst: 100,
+      maxThirst: 100,
+      reputation: 0,
+      inventory: { ...origin.startingEquipment,
+        "Thuốc Mỡ Chữa Lành": 5
+      },
+      skills: origin.startingSkills.map(s => ({ ...s,
+        currentCooldown: 0
+      })),
       knownRecipeIds: origin.startingRecipes || [],
       weaponProficiencies: weaponProficiencies,
-      magicMasteries: (["Huyền Bí", "Huyết Thuật", "Vực Thẳm", "Thánh Thánh"]).reduce((acc, s) => ({...acc, [s]: {level: 1, xp: 0, xpToNextLevel: 100}}), {}),
-      faith: (["Sylvian", "Gro-goroth", "Alll-mer", "Khaos, Đấng Hỗn Mang", "Aethel, Người Dệt Hư Không", "Lithos, Ý Chí Của Đá"]).reduce((acc, d) => ({...acc, [d]: {markLevel: 0, faithPoints: 0, faithPointsToNextLevel: 100}}), {}),
+      magicMasteries: ALL_MAGIC_SCHOOLS.reduce((acc, s) => ({ ...acc,
+        [s]: {
+          level: 1,
+          xp: 0,
+          xpToNextLevel: 100
+        }
+      }), {}),
+      faith: ALL_DEITIES.reduce((acc, d) => ({ ...acc,
+        [d]: {
+          markLevel: 0,
+          faithPoints: 0,
+          faithPointsToNextLevel: 100
+        }
+      }), {}),
       sanctuary: null,
-      journal: { quests: [], lore: [], characters: [], bestiary: [] },
+      journal: {
+        quests: [],
+        lore: [],
+        characters: [],
+        bestiary: []
+      },
       companions: [],
+      godMode: false
     };
     setCharacter(defaultCharacter);
     setTurnCount(0);
@@ -2646,28 +2719,25 @@ const App = () => {
     const scene = await generateScene(defaultCharacter, "[CHẾ ĐỘ THỬ NGHIỆM CHIẾN ĐẤU]: Bắt đầu một trận chiến ngẫu nhiên chống lại một kẻ thù đầy thách thức.", '', [], enableGore);
     processScene(scene, defaultCharacter);
   }, [processScene, enableGore]);
-
-  const handleCreationFinish = (newCharacter) => {
+  const handleCreationFinish = newCharacter => {
     startGame(newCharacter);
   };
-  
-  const handleGoToCreator = (mode) => {
+  const handleGoToCreator = mode => {
     setCreationMode(mode);
     setGameState('CHARACTER_CREATION');
   };
-
   const handleContinue = () => {
-     try {
+    try {
       const savedGameJSON = localStorage.getItem(SAVE_GAME_KEY);
       if (savedGameJSON) {
         const savedGameState = JSON.parse(savedGameJSON);
         if (savedGameState.character && savedGameState.character.journal && savedGameState.character.inventory) {
-            setCharacter(savedGameState.character);
-            setTurnCount(savedGameState.turnCount);
-            setCurrentScene(savedGameState.currentScene);
-            setGameState('PLAYING');
+          setCharacter(savedGameState.character);
+          setTurnCount(savedGameState.turnCount);
+          setCurrentScene(savedGameState.currentScene);
+          setGameState('PLAYING');
         } else {
-             throw new Error("Save file is corrupted or outdated.");
+          throw new Error("Save file is corrupted or outdated.");
         }
       }
     } catch (error) {
@@ -2678,65 +2748,68 @@ const App = () => {
       setGameState('START_SCREEN');
     }
   };
-
   const handleRestart = () => {
     const isPermadeath = character?.difficulty.permadeath;
     setCharacter(null);
     setCurrentScene(null);
     setGameOverReason('');
-    setGameState(isPermadeath ? 'CHARACTER_CREATION' : 'START_SCREEN');
+    setGameState('START_SCREEN');
     setLoading(false);
     setTurnCount(0);
   };
-  
   const renderContent = () => {
     switch (gameState) {
       case 'START_SCREEN':
-        return (
-          <>
-            <StartScreen 
-                onStart={handleGoToCreator} 
-                hasSave={hasSave} 
-                onContinue={handleContinue} 
-                onStartCombatSandbox={handleStartCombatSandbox} 
-                enableGore={enableGore} 
-                onGoreToggle={handleGoreToggle} 
-                onOpenAiManager={() => setIsAiManagerOpen(true)}
-            />
-            <AiSourceManagerModal 
-                isOpen={isAiManagerOpen}
-                onClose={() => setIsAiManagerOpen(false)}
-                saveConfig={saveAiConfig_internal}
-                getConfig={getAiConfig_internal}
-            />
-          </>
-        );
+        return React.createElement(React.Fragment, null, React.createElement(StartScreen, {
+          onStart: handleGoToCreator,
+          hasSave: hasSave,
+          onContinue: handleContinue,
+          onStartCombatSandbox: handleStartCombatSandbox,
+          enableGore: enableGore,
+          onGoreToggle: handleGoreToggle,
+          onOpenAiManager: () => setIsAiManagerOpen(true)
+        }), React.createElement(AiSourceManagerModal, {
+          isOpen: isAiManagerOpen,
+          onClose: () => setIsAiManagerOpen(false),
+          saveConfig: saveAiConfig_internal,
+          getConfig: getAiConfig_internal
+        }));
       case 'CHARACTER_CREATION':
-        return <CharacterCreationScreen onFinish={handleCreationFinish} mode={creationMode} />;
+        return React.createElement(CharacterCreationScreen, {
+          onFinish: handleCreationFinish,
+          mode: creationMode
+        });
       case 'PLAYING':
-        return character && currentScene ? (
-          <GameScreen 
-            character={character} 
-            scene={currentScene} 
-            loading={loading} 
-            onChoice={handleChoice} 
-          />
-        ) : <LoadingSpinner/>;
+        return character && currentScene ? React.createElement(GameScreen, {
+          character: character,
+          scene: currentScene,
+          loading: loading,
+          onChoice: handleChoice
+        }) : React.createElement(LoadingSpinner, null);
       case 'GAME_OVER':
-        return <GameOverScreen reason={gameOverReason} onRestart={handleRestart} />;
+        return React.createElement(GameOverScreen, {
+          reason: gameOverReason,
+          onRestart: handleRestart
+        });
       default:
-        return <StartScreen onStart={handleGoToCreator} hasSave={hasSave} onContinue={handleContinue} onStartCombatSandbox={handleStartCombatSandbox} enableGore={enableGore} onGoreToggle={handleGoreToggle} onOpenAiManager={() => setIsAiManagerOpen(true)} />;
+        return React.createElement(StartScreen, {
+          onStart: handleGoToCreator,
+          hasSave: hasSave,
+          onContinue: handleContinue,
+          onStartCombatSandbox: handleStartCombatSandbox,
+          enableGore: enableGore,
+          onGoreToggle: handleGoreToggle,
+          onOpenAiManager: () => setIsAiManagerOpen(true)
+        });
     }
   };
-
-  return (
-    <div className="min-h-screen w-full bg-black text-gray-300 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/crissxcross.png')] opacity-10"></div>
-      <div className="relative z-10 w-full">
-        {renderContent()}
-      </div>
-    </div>
-  );
+  return React.createElement("div", {
+    className: "min-h-screen w-full bg-black text-gray-300 flex items-center justify-center p-2 sm:p-4"
+  }, React.createElement("div", {
+    className: "absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/crissxcross.png')] opacity-10"
+  }), React.createElement("div", {
+    className: "relative z-10 w-full"
+  }, renderContent()));
 };
 
 // --- END OF COMPONENTS & APP ---
@@ -2746,13 +2819,8 @@ const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
-
 const root = ReactDOM.createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+root.render(React.createElement(React.StrictMode, null, React.createElement(App, null)));
 // --- END OF index.tsx ---
 
     </script>
