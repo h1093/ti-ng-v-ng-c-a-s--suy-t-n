@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import type { Character, Scene, Skill, Recipe, BodyPart, DeityName } from '../types';
 import LoadingSpinner from './LoadingSpinner';
@@ -10,6 +11,7 @@ import { RECIPES } from '../data/craftingData';
 import CharacterDetailsModal from './CharacterDetailsModal';
 import MarkLevelUpModal from './MarkLevelUpModal';
 import CompanionDisplay from './CompanionDisplay';
+import SidePanelAccordion from './SidePanelAccordion';
 
 
 interface GameScreenProps {
@@ -157,34 +159,48 @@ const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loading, onCh
         style={screenEffectStyle}
       >
         <aside className="w-full md:w-1/3 lg:w-1/4 flex flex-col gap-4">
-            <h3 className="text-xl font-bold text-red-500 text-center">{character.name}</h3>
-            {character.godMode && <div className="text-center font-bold text-yellow-400 border border-yellow-500 bg-yellow-900/30 py-1 rounded-md">Ý CHÍ SÁNG THẾ</div>}
-            <BodyStatus bodyParts={character.bodyParts} />
+            <div className="text-center">
+              <h3 className="text-xl font-bold text-red-500">{character.name}</h3>
+              {character.godMode && <div className="mt-1 text-sm font-bold text-yellow-400 border border-yellow-500 bg-yellow-900/30 py-1 rounded-md">Ý CHÍ SÁNG THẾ</div>}
+            </div>
+            
+            <SidePanelAccordion title="Trạng Thái Cơ Thể" initialOpen={true}>
+              <BodyStatus bodyParts={character.bodyParts} />
+            </SidePanelAccordion>
             
             {character.companions && character.companions.length > 0 && (
-              <div className="mt-2">
-                <h3 className="text-lg font-bold text-green-500 text-center mb-2">Đồng Hành & Đệ Tử</h3>
+              <SidePanelAccordion title="Đồng Hành & Đệ Tử" initialOpen={true}>
                 <div className="flex flex-col gap-3">
                     {character.companions.map((comp, index) => (
                         <CompanionDisplay key={`${comp.name}-${index}`} companion={comp} />
                     ))}
                 </div>
-              </div>
+              </SidePanelAccordion>
             )}
 
-            <div className="flex flex-col gap-3">
-              <StatDisplay label="MÁU" value={character.stats.hp} maxValue={character.stats.maxHp} color="bg-red-600" />
-              <StatDisplay label="TINH THẦN" value={character.stats.san} maxValue={character.stats.maxSan} color="bg-purple-600" />
-              <StatDisplay label="THỂ LỰC" value={character.stats.stamina} maxValue={character.stats.maxStamina} color="bg-green-600" />
-              <StatDisplay label="MANA" value={character.stats.mana} maxValue={character.stats.maxMana} color="bg-blue-600" />
-              <StatDisplay label="CƠN ĐÓI" value={character.hunger} maxValue={character.maxHunger} color="bg-yellow-700" />
-              <StatDisplay label="CƠN KHÁT" value={character.thirst} maxValue={character.maxThirst} color="bg-cyan-600" />
-            </div>
-             <div className="grid grid-cols-3 gap-2 text-center text-sm mt-2">
-                <div><span className="text-gray-400">TẤN CÔNG</span><p className="font-bold text-lg text-white">{character.stats.attack}</p></div>
-                <div><span className="text-gray-400">PHÒNG THỦ</span><p className="font-bold text-lg text-white">{character.stats.defense}</p></div>
-                <div><span className="text-gray-400">TỐC ĐỘ</span><p className="font-bold text-lg text-white">{character.stats.speed}</p></div>
-             </div>
+            <SidePanelAccordion title="Chỉ Số Sống" initialOpen={true}>
+              <div className="flex flex-col gap-3">
+                <StatDisplay label="MÁU" value={character.stats.hp} maxValue={character.stats.maxHp} color="bg-red-600" />
+                <StatDisplay label="TINH THẦN" value={character.stats.san} maxValue={character.stats.maxSan} color="bg-purple-600" />
+                <StatDisplay label="THỂ LỰC" value={character.stats.stamina} maxValue={character.stats.maxStamina} color="bg-green-600" />
+                <StatDisplay label="MANA" value={character.stats.mana} maxValue={character.stats.maxMana} color="bg-blue-600" />
+              </div>
+            </SidePanelAccordion>
+
+            <SidePanelAccordion title="Nhu Yếu Phẩm">
+               <div className="flex flex-col gap-3">
+                <StatDisplay label="CƠN ĐÓI" value={character.hunger} maxValue={character.maxHunger} color="bg-yellow-700" />
+                <StatDisplay label="CƠN KHÁT" value={character.thirst} maxValue={character.maxThirst} color="bg-cyan-600" />
+              </div>
+            </SidePanelAccordion>
+
+            <SidePanelAccordion title="Thuộc Tính">
+               <div className="grid grid-cols-3 gap-2 text-center text-sm">
+                  <div><span className="text-gray-400">TẤN CÔNG</span><p className="font-bold text-lg text-white">{character.stats.attack}</p></div>
+                  <div><span className="text-gray-400">PHÒNG THỦ</span><p className="font-bold text-lg text-white">{character.stats.defense}</p></div>
+                  <div><span className="text-gray-400">TỐC ĐỘ</span><p className="font-bold text-lg text-white">{character.stats.speed}</p></div>
+               </div>
+            </SidePanelAccordion>
         </aside>
         <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col">
           {inCombat && (
