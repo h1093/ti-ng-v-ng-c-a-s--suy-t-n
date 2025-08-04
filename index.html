@@ -403,7 +403,97 @@ function applyGodMode(character) {
 // --- END OF services/characterStateService.ts ---
 
 // --- START OF services/geminiService.ts ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const AI_CONFIG_KEY = 'ai_source_config_v1';
+let ai_instance_for_service;
+let ai_config = { source: 'default', keys: [], currentIndex: 0 };
+
+function loadAiConfig_internal() {
+    try {
+        const saved = localStorage.getItem(AI_CONFIG_KEY);
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.source && Array.isArray(parsed.keys)) {
+                ai_config = { ...{ source: 'default', keys: [], currentIndex: 0 }, ...parsed };
+            }
+        }
+    } catch (e) {
+        console.error("Failed to load AI config, using default.", e);
+        localStorage.removeItem(AI_CONFIG_KEY);
+    }
+}
+
+function getApiKey_internal() {
+    if (ai_config.source === 'custom' && ai_config.keys.length > 0) {
+        return ai_config.keys[ai_config.currentIndex];
+    }
+    return process.env.API_KEY;
+}
+
+function initializeAi_internal() {
+    const apiKey = getApiKey_internal();
+    if (apiKey) {
+        try {
+            ai_instance_for_service = new GoogleGenAI({ apiKey });
+        } catch (e) {
+            console.error("Failed to initialize GoogleGenAI, likely due to invalid API key format.", e);
+            ai_instance_for_service = null;
+        }
+    } else {
+        ai_instance_for_service = null;
+    }
+}
+
+function saveAiConfig_internal(source, keys) {
+    ai_config = { source, keys, currentIndex: 0 };
+    try {
+      localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(ai_config));
+    } catch (e) {
+      console.error("Failed to save AI config.", e);
+    }
+    initializeAi_internal();
+}
+
+function getAiConfig_internal() {
+    return { ...ai_config };
+}
+
+function rotateKey_internal() {
+    if (ai_config.source === 'custom' && ai_config.keys.length > 1) {
+        ai_config.currentIndex = (ai_config.currentIndex + 1) % ai_config.keys.length;
+        localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(ai_config));
+        initializeAi_internal();
+        console.log(`Rotated to API key index ${ai_config.currentIndex}`);
+        return true;
+    }
+    return false;
+}
+
+loadAiConfig_internal();
+initializeAi_internal();
+
+async function callGeminiWithRetry(params, isBackstory = false) {
+    if (!ai_instance_for_service) {
+        const errorMsg = "AI Client không được khởi tạo. Vui lòng cấu hình API Key trong phần 'Quản Lý Nguồn AI' ở màn hình chính.";
+        if (isBackstory) return errorMsg;
+        throw new Error(errorMsg);
+    }
+    try {
+        return await ai_instance_for_service.models.generateContent(params);
+    } catch (error) {
+        console.error("Gemini API Error:", error);
+        const rotated = rotateKey_internal();
+        if (rotated) {
+            console.log("Retrying with new key...");
+            if (!ai_instance_for_service) {
+                 if (isBackstory) return "AI Client không thể khởi tạo với key mới.";
+                 throw new Error("AI Client could not be re-initialized with the new key.");
+            }
+            return await ai_instance_for_service.models.generateContent(params);
+        }
+        throw error;
+    }
+}
+
 
 const recipeMaterialSchema = {
     type: Type.OBJECT,
@@ -786,7 +876,7 @@ async function generateScene(
     `;
 
     try {
-        const response = await ai.models.generateContent({
+        const response = await callGeminiWithRetry({
             model,
             contents: [{ parts: [{ text: prompt }] }],
             config: {
@@ -822,10 +912,10 @@ async function generateBackstory(name, gender, origin) {
         .replace('{origin}', origin);
 
     try {
-        const response = await ai.models.generateContent({
+        const response = await callGeminiWithRetry({
             model,
             contents: [{ parts: [{ text: prompt }] }],
-        });
+        }, true);
         return response.text.trim();
     } catch (error) {
         console.error("Lỗi khi tạo tiểu sử:", error);
@@ -835,6 +925,95 @@ async function generateBackstory(name, gender, origin) {
 // --- END OF services/geminiService.ts ---
 
 // --- START OF ALL COMPONENTS ---
+const AiSourceManagerModal = ({ isOpen, onClose, saveConfig, getConfig }) => {
+  if (!isOpen) return null;
+
+  const [initialConfig, setInitialConfig] = useState({ source: 'default', keys: [] });
+  const [keys, setKeys] = useState('');
+  
+  useEffect(() => {
+    const config = getConfig();
+    setInitialConfig(config);
+    setKeys(config.keys.join('\n'));
+  }, [isOpen, getConfig]);
+
+  const handleSelectDefault = () => {
+    saveConfig('default', []);
+    onClose();
+  };
+  
+  const handleSaveCustom = () => {
+    const parsedKeys = keys.split('\n').map(k => k.trim()).filter(Boolean);
+    if (parsedKeys.length === 0) {
+        alert("Vui lòng nhập ít nhất một API Key.");
+        return;
+    }
+    saveConfig('custom', parsedKeys);
+    onClose();
+  }
+
+  const isDefaultActive = initialConfig.source === 'default';
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="ai-manager-title">
+      <div className="w-full max-w-lg bg-[#202123] text-gray-200 rounded-lg shadow-2xl p-6 border border-gray-700 flex flex-col gap-4" onClick={(e) => e.stopPropagation()}>
+        <header className="flex justify-between items-center">
+          <h2 id="ai-manager-title" className="text-2xl font-bold" style={{color: '#ff9d9d'}}>Quản Lý Nguồn AI</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-3xl" aria-label="Đóng">&times;</button>
+        </header>
+
+        <main className="flex flex-col gap-4">
+          {/* Default AI Section */}
+          <div className={`p-4 border rounded-lg transition-all ${isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`}>
+            <h3 className="font-bold text-lg mb-3 text-gray-300">Nguồn AI Mặc Định</h3>
+            <button
+              onClick={handleSelectDefault}
+              className="w-full flex items-center justify-center gap-3 p-3 rounded-md bg-gray-700/60 hover:bg-gray-700/90 transition-colors"
+            >
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white">
+                <path d="M12 2.5L13.1875 5.59375L16.2812 6.78125L13.1875 7.96875L12 11L10.8125 7.96875L7.71875 6.78125L10.8125 5.59375L12 2.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M5.5 8.5L6.4375 10.8125L8.75 11.75L6.4375 12.6875L5.5 15L4.5625 12.6875L2.25 11.75L4.5625 10.8125L5.5 8.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M18.5 11.5L19.4375 13.8125L21.75 14.75L19.4375 15.6875L18.5 18L17.5625 15.6875L15.25 14.75L17.5625 13.8125L18.5 11.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              Sử Dụng Gemini AI Mặc Định
+            </button>
+            {isDefaultActive && <p className="text-center mt-2 text-blue-400 font-semibold">Đang hoạt động</p>}
+          </div>
+
+          <div className="flex items-center gap-4">
+            <hr className="flex-grow border-gray-600" />
+            <span className="text-gray-500">hoặc</span>
+            <hr className="flex-grow border-gray-600" />
+          </div>
+
+          {/* Custom API Key Section */}
+          <div className={`p-4 border rounded-lg transition-all ${!isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`}>
+            <h3 className="font-bold text-lg mb-3 text-gray-300">Sử Dụng API Key Của Bạn</h3>
+            <textarea
+              value={keys}
+              onChange={e => setKeys(e.target.value)}
+              placeholder="dán api_key_1&#10;dán api_key_2&#10;..."
+              rows={4}
+              className="w-full bg-gray-900/80 border border-gray-600 p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            ></textarea>
+            <p className="text-xs text-gray-400 mt-2">
+              Nhập một hoặc nhiều API Key Gemini, mỗi key một dòng (sử dụng Shift + Enter để xuống dòng). API Key sẽ được lưu cục bộ. Ứng dụng sẽ tự động xoay vòng key nếu một key gặp lỗi.
+            </p>
+            <button onClick={handleSaveCustom} className="w-full mt-4 px-6 py-2 rounded-md bg-gray-700/60 hover:bg-gray-700/90 transition-colors font-semibold">
+              Lưu và Sử Dụng Các Key Này
+            </button>
+            {!isDefaultActive && <p className="text-center mt-2 text-blue-400 font-semibold">Đang hoạt động</p>}
+          </div>
+        </main>
+        
+        <footer className="flex justify-end gap-4 mt-2 border-t border-gray-700 pt-4">
+            <button onClick={onClose} className="px-8 py-2 rounded-md bg-gray-600/70 hover:bg-gray-600 transition-colors">Đóng</button>
+        </footer>
+      </div>
+    </div>
+  );
+};
+
 const LoadingSpinner = () => {
   return (
     <div className="flex justify-center items-center p-8">
@@ -1575,7 +1754,8 @@ const StartScreen = ({
     onContinue,
     onStartCombatSandbox,
     enableGore,
-    onGoreToggle
+    onGoreToggle,
+    onOpenAiManager
 }) => {
   return (
     <div className="w-full max-w-3xl mx-auto flex flex-col items-center text-center p-6 bg-black/50 border border-gray-800 shadow-2xl shadow-red-900/20 rounded-lg">
@@ -1617,37 +1797,41 @@ const StartScreen = ({
         </button>
       </div>
 
-      <div className="mt-8 pt-6 border-t border-gray-800 w-full max-w-lg text-left">
+       <div className="mt-8 pt-6 border-t border-gray-800 w-full max-w-lg text-left">
           <h2 className="text-xl font-bold text-yellow-400 mb-3 text-center">Nhật Ký Cập Nhật: Tiếng Vọng Từ Hư Không</h2>
           <ul className="text-sm text-gray-400 list-disc list-inside space-y-2 bg-black/20 p-4 rounded-md border border-gray-700/50">
+              <li>
+                  <span className="font-semibold text-gray-300">Quản lý Nguồn AI:</span> Giờ bạn có thể sử dụng API Key của riêng mình. Nhấn nút 'Quản Lý Nguồn AI' bên dưới.
+              </li>
               <li>
                   <span className="font-semibold text-gray-300">Các Ngoại Thần đã thức tỉnh:</span> Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos).
               </li>
               <li>
                   <span className="font-semibold text-gray-300">Hệ Thống Ấn Ký Mới:</span> Nhận được Ấn Ký từ các Ngoại Thần thông qua nghi lễ hoặc khi hành động của bạn thu hút sự chú ý của chúng. Mỗi Ấn Ký đều có hai mặt.
               </li>
-              <li>
-                  <span className="font-semibold text-gray-300">Cái Giá Của Kiến Thức:</span> Tiếp xúc với các Ngoại Thần giờ đây sẽ bào mòn Tinh thần của bạn một cách dữ dội. Hãy chuẩn bị tinh thần.
-              </li>
           </ul>
       </div>
 
-
-      <div className="mt-8 pt-4 border-t border-gray-800 w-full max-w-sm flex items-center justify-center gap-4">
-        <label htmlFor="gore-toggle" className="text-gray-400">Nội dung 18+:</label>
-        <div 
-            onClick={() => onGoreToggle(!enableGore)}
-            className="relative inline-flex items-center cursor-pointer"
-            id="gore-toggle"
-            role="switch"
-            aria-checked={enableGore}
-        >
-          <div className="w-11 h-6 bg-gray-600 rounded-full"></div>
-          <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${enableGore ? 'transform translate-x-5 bg-red-500' : ''}`}></div>
+      <div className="mt-8 pt-4 border-t border-gray-800 w-full max-w-sm flex flex-col items-center justify-center gap-4">
+        <button onClick={onOpenAiManager} className="bg-transparent border-2 border-blue-500 text-blue-400 font-bold py-2 px-6 rounded-sm hover:bg-blue-500 hover:text-black transition-all duration-300 transform hover:scale-105">
+           Quản Lý Nguồn AI
+        </button>
+        <div className="mt-4 flex items-center justify-center gap-4">
+            <label htmlFor="gore-toggle" className="text-gray-400">Nội dung 18+:</label>
+            <div 
+                onClick={() => onGoreToggle(!enableGore)}
+                className="relative inline-flex items-center cursor-pointer"
+                id="gore-toggle"
+                role="switch"
+                aria-checked={enableGore}
+            >
+              <div className="w-11 h-6 bg-gray-600 rounded-full"></div>
+              <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${enableGore ? 'transform translate-x-5 bg-red-500' : ''}`}></div>
+            </div>
+            <span className={`font-bold ${enableGore ? 'text-red-500' : 'text-gray-500'}`}>
+                {enableGore ? 'BẬT' : 'TẮT'}
+            </span>
         </div>
-        <span className={`font-bold ${enableGore ? 'text-red-500' : 'text-gray-500'}`}>
-            {enableGore ? 'BẬT' : 'TẮT'}
-        </span>
       </div>
     </div>
   );
@@ -2232,6 +2416,7 @@ const App = () => {
   const [hasSave, setHasSave] = useState(false);
   const [enableGore, setEnableGore] = useState(true);
   const [creationMode, setCreationMode] = useState('standard');
+  const [isAiManagerOpen, setIsAiManagerOpen] = useState(false);
 
   const WORLD_EVENT_TURN_INTERVAL = 5;
   const SAVE_GAME_KEY = 'echoes_of_ruin_save_v5';
@@ -2500,7 +2685,25 @@ const App = () => {
   const renderContent = () => {
     switch (gameState) {
       case 'START_SCREEN':
-        return <StartScreen onStart={handleGoToCreator} hasSave={hasSave} onContinue={handleContinue} onStartCombatSandbox={handleStartCombatSandbox} enableGore={enableGore} onGoreToggle={handleGoreToggle} />;
+        return (
+          <>
+            <StartScreen 
+                onStart={handleGoToCreator} 
+                hasSave={hasSave} 
+                onContinue={handleContinue} 
+                onStartCombatSandbox={handleStartCombatSandbox} 
+                enableGore={enableGore} 
+                onGoreToggle={handleGoreToggle} 
+                onOpenAiManager={() => setIsAiManagerOpen(true)}
+            />
+            <AiSourceManagerModal 
+                isOpen={isAiManagerOpen}
+                onClose={() => setIsAiManagerOpen(false)}
+                saveConfig={saveAiConfig_internal}
+                getConfig={getAiConfig_internal}
+            />
+          </>
+        );
       case 'CHARACTER_CREATION':
         return <CharacterCreationScreen onFinish={handleCreationFinish} mode={creationMode} />;
       case 'PLAYING':
