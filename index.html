@@ -80,7 +80,7 @@
     <script type="module">
 // --- HOISTED IMPORTS ---
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import ReactDOM from 'react-dom/client';
+import { createRoot } from 'react-dom/client';
 import { GoogleGenAI, Type } from "@google/genai";
 
 // --- START OF data/craftingData.ts ---
@@ -2819,7 +2819,7 @@ const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
-const root = ReactDOM.createRoot(rootElement);
+const root = createRoot(rootElement);
 root.render(React.createElement(React.StrictMode, null, React.createElement(App, null)));
 // --- END OF index.tsx ---
 
