@@ -478,7 +478,8 @@ async function callGeminiWithRetry(params, isBackstory = false) {
         throw new Error(errorMsg);
     }
     try {
-        return await ai_instance_for_service.models.generateContent(params);
+        const response = await ai_instance_for_service.models.generateContent(params);
+        return response;
     } catch (error) {
         console.error("Gemini API Error:", error);
         const rotated = rotateKey_internal();
@@ -765,19 +766,19 @@ const sceneSchema = {
     updatedCompanions: { type: Type.ARRAY, items: companionSchema, description: "Toàn bộ danh sách đồng hành/đệ tử đã được cập nhật sau lượt này. Nếu một đệ tử chết, nó sẽ bị xóa khỏi danh sách này." },
     tamingResult: { ...tamingResultSchema, description: "Kết quả của nỗ lực thuần hóa." },
     reanimationResult: { ...reanimationResultSchema, description: "Kết quả của nỗ lực gọi hồn." },
+    journalUpdates: {
+        type: Type.OBJECT,
+        properties: {
+            quests: { type: Type.ARRAY, items: journalEntrySchema },
+            lore: { type: Type.ARRAY, items: journalEntrySchema },
+            characters: { type: Type.ARRAY, items: journalEntrySchema },
+            bestiary: { type: Type.ARRAY, items: journalEntrySchema },
+        },
+    }
   },
   required: ['description', 'choices']
 };
 
-const journalistSchema = {
-    type: Type.OBJECT,
-    properties: {
-        quests: { type: Type.ARRAY, items: journalEntrySchema },
-        lore: { type: Type.ARRAY, items: journalEntrySchema },
-        characters: { type: Type.ARRAY, items: journalEntrySchema },
-        bestiary: { type: Type.ARRAY, items: journalEntrySchema },
-    },
-};
 
 const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master), một AI dẫn chuyện cho một RPG văn bản kỳ ảo hắc ám. Bạn chỉ tập trung vào tường thuật, khám phá và sinh tồn.
 **LUẬT CHUNG:**
@@ -928,31 +929,35 @@ async function generateBackstory(name, gender, origin) {
 const AiSourceManagerModal = ({ isOpen, onClose, saveConfig, getConfig }) => {
   if (!isOpen) return null;
 
-  const [initialConfig, setInitialConfig] = useState({ source: 'default', keys: [] });
-  const [keys, setKeys] = useState('');
+  const [currentConfig, setCurrentConfig] = useState({ source: 'default', keys: [] });
+  const [keysInput, setKeysInput] = useState('');
   
   useEffect(() => {
-    const config = getConfig();
-    setInitialConfig(config);
-    setKeys(config.keys.join('\n'));
+    if (isOpen) {
+        const config = getConfig();
+        setCurrentConfig(config);
+        setKeysInput(config.keys.join('\n'));
+    }
   }, [isOpen, getConfig]);
 
   const handleSelectDefault = () => {
     saveConfig('default', []);
-    onClose();
+    const newConfig = { ...getConfig() };
+    setCurrentConfig(newConfig);
   };
   
   const handleSaveCustom = () => {
-    const parsedKeys = keys.split('\n').map(k => k.trim()).filter(Boolean);
+    const parsedKeys = keysInput.split('\n').map(k => k.trim()).filter(Boolean);
     if (parsedKeys.length === 0) {
         alert("Vui lòng nhập ít nhất một API Key.");
         return;
     }
     saveConfig('custom', parsedKeys);
-    onClose();
+    const newConfig = { ...getConfig() };
+    setCurrentConfig(newConfig);
   }
 
-  const isDefaultActive = initialConfig.source === 'default';
+  const isDefaultActive = currentConfig.source === 'default';
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="ai-manager-title">
@@ -990,8 +995,8 @@ const AiSourceManagerModal = ({ isOpen, onClose, saveConfig, getConfig }) => {
           <div className={`p-4 border rounded-lg transition-all ${!isDefaultActive ? 'border-blue-500' : 'border-gray-600'}`}>
             <h3 className="font-bold text-lg mb-3 text-gray-300">Sử Dụng API Key Của Bạn</h3>
             <textarea
-              value={keys}
-              onChange={e => setKeys(e.target.value)}
+              value={keysInput}
+              onChange={e => setKeysInput(e.target.value)}
               placeholder="dán api_key_1&#10;dán api_key_2&#10;..."
               rows={4}
               className="w-full bg-gray-900/80 border border-gray-600 p-2 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
@@ -2516,7 +2521,7 @@ const App = () => {
         notificationText = `${reanimationNotif}\n\n${notificationText}`;
     }
     
-    const sceneDescription = notificationText ? `${notificationText}\n\n${scene.description}` : scene.description;
+    const sceneDescription = notificationText ? `${notificationText.trim()}\n\n${scene.description}` : scene.description;
     
     const { clampedStats, clampedHunger, clampedThirst } = clampStats(
       charToUpdate.stats, charToUpdate.hunger, charToUpdate.thirst,
@@ -2718,7 +2723,7 @@ const App = () => {
       case 'GAME_OVER':
         return <GameOverScreen reason={gameOverReason} onRestart={handleRestart} />;
       default:
-        return <StartScreen onStart={handleGoToCreator} hasSave={hasSave} onContinue={handleContinue} onStartCombatSandbox={handleStartCombatSandbox} enableGore={enableGore} onGoreToggle={handleGoreToggle} />;
+        return <StartScreen onStart={handleGoToCreator} hasSave={hasSave} onContinue={handleContinue} onStartCombatSandbox={handleStartCombatSandbox} enableGore={enableGore} onGoreToggle={handleGoreToggle} onOpenAiManager={() => setIsAiManagerOpen(true)} />;
     }
   };
 
