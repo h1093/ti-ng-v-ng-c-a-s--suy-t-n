@@ -62,17 +62,14 @@
     
     <!-- Import Map for ES Modules -->
     <script type="importmap">
-{
-  "imports": {
-    "react-dom/client": "https://esm.sh/react-dom@19.0.0-rc.0/client",
-    "@google/genai": "https://esm.sh/@google/genai@^1.12.0",
-    "react": "https://esm.sh/react@19.0.0-rc.0",
-    "vite": "https://esm.sh/vite@^7.0.6",
-    "path": "https://esm.sh/path@^0.12.7",
-    "url": "https://esm.sh/url@^0.11.4"
-  }
-}
-</script>
+    {
+      "imports": {
+        "react-dom/client": "https://esm.sh/react-dom@19.0.0-rc.0/client",
+        "@google/genai": "https://esm.sh/@google/genai@^1.12.0",
+        "react": "https://esm.sh/react@19.0.0-rc.0"
+      }
+    }
+    </script>
     
 <link rel="stylesheet" href="/index.css">
 </head>
@@ -301,24 +298,12 @@ function applyWeaponProficiencyUpdates(currentProficiencies, updates) {
 
 function applyMagicMasteryUpdates(currentMasteries, updates) {
     if (!updates) return currentMasteries;
-    const newMasteries = { ...currentMasteries };
-    for (const update of updates) {
-        if (update.name && update.proficiency) {
-            newMasteries[update.name] = update.proficiency;
-        }
-    }
-    return newMasteries;
+    return { ...currentMasteries, ...updates };
 }
 
 function applyFaithUpdates(currentFaith, updates) {
     if (!updates) return currentFaith;
-    const newFaith = { ...currentFaith };
-    for (const update of updates) {
-        if (update.name && update.status) {
-            newFaith[update.name] = update.status;
-        }
-    }
-    return newFaith;
+    return { ...currentFaith, ...updates };
 }
 
 function applySanctuaryUpdate(currentSanctuary, update) {
@@ -529,6 +514,7 @@ const recipeMaterialSchema = {
         name: { type: Type.STRING },
         quantity: { type: Type.INTEGER },
     },
+    required: ['name', 'quantity'],
 };
 
 const recipeSchema = {
@@ -547,8 +533,10 @@ const recipeSchema = {
                 name: { type: Type.STRING },
                 quantity: { type: Type.INTEGER },
             },
+            required: ['name', 'quantity'],
         },
     },
+    required: ['id', 'name', 'description', 'materials', 'result']
 };
 
 const companionStatsSchema = {
@@ -562,6 +550,7 @@ const companionStatsSchema = {
         stamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER },
         charisma: { type: Type.INTEGER },
     },
+    required: ['hp', 'maxHp', 'attack', 'defense', 'speed', 'san', 'maxSan', 'mana', 'maxMana', 'stamina', 'maxStamina', 'charisma']
 };
 
 const companionSchema = {
@@ -571,8 +560,9 @@ const companionSchema = {
         type: { type: Type.STRING },
         stats: companionStatsSchema,
         statusEffects: { type: Type.ARRAY, items: { type: Type.STRING } },
-        isUndead: { type: Type.BOOLEAN }
+        isUndead: { type: Type.BOOLEAN, description: "True nếu đây là một đệ tử bất tử."}
     },
+    required: ['name', 'type', 'stats']
 };
 
 const tamingResultSchema = {
@@ -583,6 +573,7 @@ const tamingResultSchema = {
         creatureType: { type: Type.STRING },
         companion: { ...companionSchema },
     },
+    required: ['success', 'creatureName', 'creatureType']
 };
 
 const reanimationResultSchema = {
@@ -593,6 +584,7 @@ const reanimationResultSchema = {
         companion: { ...companionSchema },
         message: { type: Type.STRING }
     },
+    required: ['success', 'creatureName', 'message']
 };
 
 
@@ -609,6 +601,7 @@ const enemySchema = {
                 attack: { type: Type.INTEGER }, defense: { type: Type.INTEGER },
                 speed: { type: Type.INTEGER },
             },
+            required: ['hp', 'maxHp', 'attack', 'defense', 'speed']
         },
         bodyParts: {
             type: Type.OBJECT,
@@ -621,6 +614,7 @@ const enemySchema = {
         telegraphedAction: { type: Type.STRING },
         statusEffects: { type: Type.ARRAY, items: { type: Type.STRING } },
     },
+    required: ['id', 'name', 'description', 'stats', 'bodyParts', 'telegraphedAction']
 };
 
 const skillSchema = {
@@ -631,6 +625,7 @@ const skillSchema = {
         costAmount: { type: Type.INTEGER }, cooldown: { type: Type.INTEGER },
         currentCooldown: { type: Type.INTEGER }, school: { type: Type.STRING },
     },
+    required: ['id', 'name', 'description', 'costType', 'costAmount', 'cooldown', 'currentCooldown']
 };
 
 const proficiencySchema = {
@@ -639,6 +634,7 @@ const proficiencySchema = {
         level: { type: Type.INTEGER }, xp: { type: Type.INTEGER },
         xpToNextLevel: { type: Type.INTEGER },
     },
+    required: ['level', 'xp', 'xpToNextLevel']
 };
 
 const faithStatusSchema = {
@@ -647,6 +643,7 @@ const faithStatusSchema = {
         markLevel: { type: Type.INTEGER }, faithPoints: { type: Type.INTEGER },
         faithPointsToNextLevel: { type: Type.INTEGER },
     },
+    required: ['markLevel', 'faithPoints', 'faithPointsToNextLevel']
 };
 
 const followerSchema = {
@@ -654,6 +651,7 @@ const followerSchema = {
     properties: {
         name: { type: Type.STRING }, loyalty: { type: Type.INTEGER }, status: { type: Type.STRING },
     },
+    required: ['name', 'loyalty', 'status']
 };
 
 const sanctuarySchema = {
@@ -664,6 +662,7 @@ const sanctuarySchema = {
         improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
         followers: { type: Type.ARRAY, items: followerSchema },
     },
+    required: ['name', 'hope', 'population', 'improvements', 'followers']
 };
 
 const hitChanceSchema = {
@@ -672,6 +671,7 @@ const hitChanceSchema = {
         choice: { type: Type.STRING },
         chance: { type: Type.INTEGER },
     },
+    required: ['choice', 'chance'],
 };
 
 const weaponProficiencyUpdateSchema = {
@@ -680,22 +680,7 @@ const weaponProficiencyUpdateSchema = {
         name: { type: Type.STRING },
         proficiency: proficiencySchema,
     },
-};
-
-const magicMasteryUpdateSchema = {
-    type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING },
-        proficiency: proficiencySchema,
-    },
-};
-
-const faithUpdateSchema = {
-    type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING },
-        status: faithStatusSchema,
-    },
+    required: ['name', 'proficiency'],
 };
 
 const journalEntrySchema = {
@@ -704,14 +689,16 @@ const journalEntrySchema = {
         title: { type: Type.STRING },
         content: { type: Type.STRING },
     },
+    required: ['title', 'content']
 };
 
 const inventoryChangeSchema = {
     type: Type.OBJECT,
     properties: {
-        itemName: { type: Type.STRING },
-        quantity: { type: Type.INTEGER },
+        itemName: { type: Type.STRING, description: "Tên chính xác của vật phẩm." },
+        quantity: { type: Type.INTEGER, description: "Số lượng thay đổi, dùng số âm để trừ." },
     },
+    required: ['itemName', 'quantity'],
 };
 
 const markLevelUpEventSchema = {
@@ -720,13 +707,14 @@ const markLevelUpEventSchema = {
         deity: { type: Type.STRING },
         newLevel: { type: Type.INTEGER },
     },
+    required: ['deity', 'newLevel']
 };
 
 const sceneSchema = {
   type: Type.OBJECT,
   properties: {
-    description: { type: Type.STRING },
-    choices: { type: Type.ARRAY, items: { type: Type.STRING } },
+    description: { type: Type.STRING, description: "Mô tả chi tiết, mang tính kể chuyện về cảnh hiện tại, hành động của nhân vật, và hậu quả." },
+    choices: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Một danh sách các hành động mà người chơi có thể thực hiện." },
     hitChances: { type: Type.ARRAY, items: hitChanceSchema },
     enemies: { type: Type.ARRAY, items: enemySchema },
     statChanges: {
@@ -743,16 +731,17 @@ const sceneSchema = {
     inventoryChanges: {
         type: Type.ARRAY,
         items: inventoryChangeSchema,
+        description: "Các vật phẩm được thêm (số dương) hoặc bớt (số âm) khỏi túi đồ của người chơi. Trả về một mảng."
     },
     bodyPartChanges: {
         type: Type.OBJECT,
         properties: {
-            head: { type: Type.STRING },
-            torso: { type: Type.STRING },
-            leftArm: { type: Type.STRING },
-            rightArm: { type: Type.STRING },
-            leftLeg: { type: Type.STRING },
-            rightLeg: { type: Type.STRING },
+            head: { type: Type.STRING, enum: ['Khỏe Mạnh', 'Bị Thương', 'Nguy Kịch', 'Bị Cắt Đứt'] },
+            torso: { type: Type.STRING, enum: ['Khỏe Mạnh', 'Bị Thương', 'Nguy Kịch', 'Bị Cắt Đứt'] },
+            leftArm: { type: Type.STRING, enum: ['Khỏe Mạnh', 'Bị Thương', 'Nguy Kịch', 'Bị Cắt Đứt'] },
+            rightArm: { type: Type.STRING, enum: ['Khỏe Mạnh', 'Bị Thương', 'Nguy Kịch', 'Bị Cắt Đứt'] },
+            leftLeg: { type: Type.STRING, enum: ['Khỏe Mạnh', 'Bị Thương', 'Nguy Kịch', 'Bị Cắt Đứt'] },
+            rightLeg: { type: Type.STRING, enum: ['Khỏe Mạnh', 'Bị Thương', 'Nguy Kịch', 'Bị Cắt Đứt'] },
         }
     },
     gameOver: { type: Type.BOOLEAN },
@@ -761,25 +750,34 @@ const sceneSchema = {
     newlyLearnedRecipes: { type: Type.ARRAY, items: recipeSchema },
     updatedWeaponProficiencies: { type: Type.ARRAY, items: weaponProficiencyUpdateSchema },
     updatedMagicMasteries: {
-        type: Type.ARRAY,
-        items: magicMasteryUpdateSchema
+        type: Type.OBJECT,
+        properties: {
+            'Huyền Bí': proficiencySchema,
+            'Huyết Thuật': proficiencySchema,
+            'Vực Thẳm': proficiencySchema,
+            'Thánh Thánh': proficiencySchema,
+        }
     },
     xpGains: { type: Type.ARRAY, items: { type: Type.STRING } },
     levelupNotification: { type: Type.STRING },
     skillLearnedNotification: { type: Type.STRING },
     recipeLearnedNotification: { type: Type.STRING },
-    updatedFaith: { 
-        type: Type.ARRAY,
-        items: faithUpdateSchema
-    },
+    updatedFaith: { type: Type.OBJECT, properties: {
+        'Sylvian': faithStatusSchema,
+        'Gro-goroth': faithStatusSchema,
+        'Alll-mer': faithStatusSchema,
+        'Khaos, Đấng Hỗn Mang': faithStatusSchema,
+        'Aethel, Người Dệt Hư Không': faithStatusSchema,
+        'Lithos, Ý Chí Của Đá': faithStatusSchema,
+    }},
     updatedSanctuary: { ...sanctuarySchema },
     faithNotification: { type: Type.STRING },
     sanctuaryNotification: { type: Type.STRING },
     markLevelUpEvent: { ...markLevelUpEventSchema },
-    companionActionDescriptions: { type: Type.ARRAY, items: {type: Type.STRING} },
-    updatedCompanions: { type: Type.ARRAY, items: companionSchema },
-    tamingResult: { ...tamingResultSchema },
-    reanimationResult: { ...reanimationResultSchema },
+    companionActionDescriptions: { type: Type.ARRAY, items: {type: Type.STRING}, description: "Mô tả hành động của từng đồng hành/đệ tử trong lượt này." },
+    updatedCompanions: { type: Type.ARRAY, items: companionSchema, description: "Toàn bộ danh sách đồng hành/đệ tử đã được cập nhật sau lượt này. Nếu một đệ tử chết, nó sẽ bị xóa khỏi danh sách này." },
+    tamingResult: { ...tamingResultSchema, description: "Kết quả của nỗ lực thuần hóa." },
+    reanimationResult: { ...reanimationResultSchema, description: "Kết quả của nỗ lực gọi hồn." },
     journalUpdates: {
         type: Type.OBJECT,
         properties: {
@@ -790,6 +788,7 @@ const sceneSchema = {
         },
     }
   },
+  required: ['description', 'choices']
 };
 
 
@@ -1154,16 +1153,6 @@ const BodyPartComponent = ({ part, d, fill, onClick, interactive }) => React.cre
 }));
 
 const BodyStatus = ({ bodyParts, interactive = false, onPartClick }) => {
-  const defaultParts = {
-    head: 'Khỏe Mạnh',
-    torso: 'Khỏe Mạnh',
-    leftArm: 'Khỏe Mạnh',
-    rightArm: 'Khỏe Mạnh',
-    leftLeg: 'Khỏe Mạnh',
-    rightLeg: 'Khỏe Mạnh'
-  };
-  const parts = { ...defaultParts, ...bodyParts };
-
   return React.createElement("div", {
     className: "p-2 border border-gray-700 bg-black/20 rounded-md"
   }, React.createElement("svg", {
@@ -1178,37 +1167,37 @@ const BodyStatus = ({ bodyParts, interactive = false, onPartClick }) => {
     cx: "50",
     cy: "25",
     r: "15",
-    fill: statusColors[parts.head],
+    fill: statusColors[bodyParts.head],
     stroke: "#9ca3af",
     strokeWidth: "1"
   })), React.createElement(BodyPartComponent, {
     part: "torso",
     d: "M 38,40 L 62,40 L 68,85 L 32,85 Z",
-    fill: statusColors[parts.torso],
+    fill: statusColors[bodyParts.torso],
     onClick: () => onPartClick?.('torso'),
     interactive: interactive
   }), React.createElement(BodyPartComponent, {
     part: "leftArm",
     d: "M 38,45 L 28,50 L 20,80 L 28,85 Z",
-    fill: statusColors[parts.leftArm],
+    fill: statusColors[bodyParts.leftArm],
     onClick: () => onPartClick?.('leftArm'),
     interactive: interactive
   }), React.createElement(BodyPartComponent, {
     part: "rightArm",
     d: "M 62,45 L 72,50 L 80,80 L 72,85 Z",
-    fill: statusColors[parts.rightArm],
+    fill: statusColors[bodyParts.rightArm],
     onClick: () => onPartClick?.('rightArm'),
     interactive: interactive
   }), React.createElement(BodyPartComponent, {
     part: "leftLeg",
     d: "M 32,85 L 48,85 L 40,125 L 25,120 Z",
-    fill: statusColors[parts.leftLeg],
+    fill: statusColors[bodyParts.leftLeg],
     onClick: () => onPartClick?.('leftLeg'),
     interactive: interactive
   }), React.createElement(BodyPartComponent, {
     part: "rightLeg",
     d: "M 68,85 L 52,85 L 60,125 L 75,120 Z",
-    fill: statusColors[parts.rightLeg],
+    fill: statusColors[bodyParts.rightLeg],
     onClick: () => onPartClick?.('rightLeg'),
     interactive: interactive
   })));
@@ -2402,7 +2391,7 @@ const GameScreen = ({ character, scene, loading, onChoice }) => {
     className: "text-lg font-bold text-gray-300 mb-2"
   }, "Hành động"), React.createElement("div", {
     className: "grid grid-cols-1 sm:grid-cols-2 gap-4"
-  }, (scene.choices || []).map((choice, index) => {
+  }, scene.choices.map((choice, index) => {
     const hitChanceEntry = scene.hitChances?.find(hc => hc.choice === choice);
     const hitChance = hitChanceEntry?.chance;
     return React.createElement("button", {
