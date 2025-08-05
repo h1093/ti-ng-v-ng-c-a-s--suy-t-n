@@ -310,6 +310,17 @@ function applyMagicMasteryUpdates(currentMasteries, updates) {
     return newMasteries;
 }
 
+function applySpecialSkillUpdates(currentSpecialSkills, updates) {
+    if (!updates) return currentSpecialSkills;
+    const newSpecialSkills = { ...currentSpecialSkills };
+    for (const [key, value] of Object.entries(updates)) {
+        if (newSpecialSkills[key]) {
+            newSpecialSkills[key] = { ...newSpecialSkills[key], ...value };
+        }
+    }
+    return newSpecialSkills;
+}
+
 function applyFaithUpdates(currentFaith, updates) {
     if (!updates) return currentFaith;
     const newFaith = { ...currentFaith };
@@ -389,6 +400,7 @@ function assembleNotifications(
     }
     if (scene.levelupNotification) parts.push(`[ ${scene.levelupNotification} ]`);
     if (scene.skillLearnedNotification) parts.push(`[ ${scene.skillLearnedNotification} ]`);
+    if (scene.specialSkillLearnedNotification) parts.push(`[ ${scene.specialSkillLearnedNotification} ]`);
 
     return parts.join('\n\n');
 }
@@ -636,7 +648,9 @@ const skillSchema = {
 const proficiencySchema = {
     type: Type.OBJECT,
     properties: {
-        level: { type: Type.INTEGER }, xp: { type: Type.INTEGER },
+        unlocked: { type: Type.BOOLEAN },
+        level: { type: Type.INTEGER }, 
+        xp: { type: Type.INTEGER },
         xpToNextLevel: { type: Type.INTEGER },
     },
 };
@@ -764,6 +778,14 @@ const sceneSchema = {
         type: Type.ARRAY,
         items: magicMasteryUpdateSchema
     },
+    updatedSpecialSkills: {
+        type: Type.OBJECT,
+        properties: {
+            BeastTaming: proficiencySchema,
+            Necromancy: proficiencySchema,
+        }
+    },
+    specialSkillLearnedNotification: { type: Type.STRING },
     xpGains: { type: Type.ARRAY, items: { type: Type.STRING } },
     levelupNotification: { type: Type.STRING },
     skillLearnedNotification: { type: Type.STRING },
@@ -801,35 +823,40 @@ const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master
 4.  **SINH TỒN & QUAN SÁT:** Quản lý cơn đói và khát của người chơi. Nếu người chơi chọn 'Quan sát' hoặc hành động tương tự, hãy thưởng cho họ bằng cách mô tả một chi tiết ẩn, một vật phẩm bị che giấu hoặc một manh mối trong \`description\`. Phần thưởng vật phẩm thực tế phải được thêm vào \`inventoryChanges\`.
 5.  **KHÔNG CHIẾN ĐẤU:** Bạn KHÔNG xử lý logic chiến đấu theo lượt. AI khác sẽ làm việc đó.
 6.  **NỘI DUNG & CHẾ ĐỘ:** Tôn trọng cờ 'enableGore' và 'godMode'. Xử lý hội thoại NPC một cách tự nhiên.
-7.  **PHẦN THƯỞNG KHÁM PHÁ:** Khi người chơi thành công vượt qua thử thách (giải đố, chiến thắng kẻ địch khó, khám phá khu vực bí mật), hãy thưởng cho họ một cách xứng đáng. Đây là cơ hội để cung cấp các vật phẩm có giá trị như "Sách Phép", "Cổ Thư", "Sách Hướng Dẫn Thuần Hóa", hoặc "Sách Nghi Lễ Cấm". Luôn sử dụng \`inventoryChanges\` để trao vật phẩm.
+7.  **PHẦN THƯỞNG KHÁM PHÁ:** Khi người chơi thành công vượt qua thử thách, thưởng cho họ vật phẩm có giá trị như "Sách Phép", "Cổ Thư", "Sách Hướng Dẫn Thuần Hóa", hoặc "Sách Nghi Lễ Cấm" qua \`inventoryChanges\`.
 
-**LUẬT THEO ĐỘ KHÓ:** Độ khó của trò chơi sẽ được cung cấp trong prompt. Bạn BẮT BUỘC phải điều chỉnh phản hồi của mình:
-*   **Tài nguyên:** Ở độ khó cao hơn ("Ác Mộng" trở lên), giảm đáng kể số lượng/chất lượng vật phẩm tìm thấy trong \`inventoryChanges\`. Ở "Địa Ngục", tài nguyên gần như không tồn tại.
-*   **Hiệu quả hồi phục:** Ở độ khó cao hơn, giảm hiệu quả của vật phẩm/kỹ năng hồi phục. Ví dụ, nếu ăn uống thường hồi 10 HP, ở "Ác Mộng" chỉ hồi 5, ở "Đày Đoạ" chỉ hồi 3.
-*   **Thử thách:** Ở độ khó cao hơn, NPC ít hợp tác hơn, các sự kiện tiêu cực của thế giới xảy ra thường xuyên và nghiêm trọng hơn.
+**LUẬT THEO ĐỘ KHÓ:** Bạn BẮT BUỘC phải điều chỉnh phản hồi theo độ khó được cung cấp. Ở độ khó cao hơn, tài nguyên khan hiếm hơn, kẻ thù nguy hiểm hơn, và NPC ít hợp tác hơn.
 
 **KỸ NĂNG & PHÉP THUẬT:**
-*   **HỌC HỎI QUA KHÁM PHÁ:** Người chơi có thể tìm thấy "Sách Phép" hoặc "Cổ Thư" (ví dụ: "Sách Phép: Tia Năng Lượng", "Cổ Thư Huyết Thuật"). Khi người chơi thực hiện hành động "Đọc [Tên Sách Phép]", bạn BẮT BUỘC phải:
-    1.  Thêm kỹ năng/phép thuật tương ứng vào mảng \`updatedSkills\`. Bạn phải tự định nghĩa toàn bộ đối tượng Skill (id, name, description, cost, v.v.).
-    2.  Tạo một \`skillLearnedNotification\` rõ ràng (ví dụ: "Bạn đã học được phép thuật Tia Năng Lượng.").
-    3.  Xóa sách đó khỏi túi đồ của người chơi bằng cách sử dụng \`inventoryChanges\` với số lượng -1.
-*   **Học Kỹ Năng Thuần Hóa:** Kỹ năng "Thuần hóa Động vật" có thể được học bằng cách tìm và đọc "Sách Hướng Dẫn Thuần Hóa". Xử lý tương tự như Sách Phép.
-*   **Học Kỹ Năng Gọi Hồn (Tử Linh Sư):** Kỹ năng này có thể được học bằng cách tìm và đọc "Sách Nghi Lễ Cấm". Xử lý tương tự như Sách Phép.
-*   **Xử lý Thuần Hóa/Gọi Hồn:** Bạn chỉ xử lý các nỗ lực thuần hóa hoặc gọi hồn bên ngoài chiến đấu. Khi người chơi cố gắng, hãy xác định kết quả.
-    *   **Thành công (Thuần hóa):** Đặt đối tượng \`tamingResult\` với \`success: true\`. Tạo một đối tượng \`companion\` hoàn chỉnh cho sinh vật đó và đưa vào \`tamingResult\`. Mô tả sự thành công.
-    *   **Thành công (Gọi hồn):** Nếu người chơi tìm thấy một xác chết phù hợp, bạn có thể cho phép họ gọi hồn. Tạo \`reanimationResult\` với \`success: true\`, tạo một companion với \`isUndead: true\`.
-    *   **Thất bại:** Đặt \`tamingResult\` hoặc \`reanimationResult\` với \`success: false\`. Mô tả sự thất bại.
+*   **HỌC QUA SÁCH:** Khi người chơi "Đọc [Tên Sách Phép]", bạn phải thêm kỹ năng tương ứng vào \`updatedSkills\`, tạo \`skillLearnedNotification\`, và xóa sách khỏi túi đồ.
+*   **Kỹ năng Thuần hóa & Gọi hồn không thuộc quy tắc này.** Xem mục Kỹ Năng Đặc Biệt.
+
+**KỸ NĂNG ĐẶC BIỆT (THUẦN THÚ & TỬ LINH):**
+*   **HỌC TỪNG CHÚT MỘT:** Các kỹ năng Thuần Thú Sư và Tử Linh Sư không được học ngay lập tức. Chúng được "mở khóa" và phải được rèn luyện để trở nên mạnh mẽ hơn.
+*   **MỞ KHÓA:**
+    *   Khi người chơi đọc "Sách Hướng Dẫn Thuần Hóa", hãy mở khóa kỹ năng Thuần Thú.
+    *   Khi người chơi đọc "Sách Nghi Lễ Cấm", hãy mở khóa kỹ năng Tử Linh Sư.
+    *   Để mở khóa, trong \`updatedSpecialSkills\`, hãy đặt đối tượng kỹ năng tương ứng thành \`{ level: 1, xp: 0, xpToNextLevel: 100, unlocked: true }\`.
+    *   Thông báo cho người chơi bằng \`specialSkillLearnedNotification\` (ví dụ: "Bạn đã cảm nhận được mối liên kết đầu tiên với các sinh vật. Kỹ năng Thuần Thú đã được mở khóa."). Cung cấp cho họ một kỹ năng *cơ bản* đầu tiên thông qua \`updatedSkills\` (ví dụ: kỹ năng "Thử Thuần Hóa" cho phép bắt đầu quá trình).
+    *   Xóa sách khỏi túi đồ của người chơi.
+*   **TĂNG KINH NGHIỆM (XP):**
+    *   **Thuần Thú:** Mỗi khi người chơi cố gắng thuần hóa một sinh vật, hãy tăng XP cho kỹ năng Thuần Thú trong \`updatedSpecialSkills\`. Thưởng nhiều XP hơn cho lần thuần hóa thành công.
+    *   **Tử Linh:** Mỗi khi người chơi hồi sinh thành công một xác chết, hãy tăng XP cho kỹ năng Tử Linh trong \`updatedSpecialSkills\`.
+*   **LÊN CẤP:** Khi \`xp\` đạt \`xpToNextLevel\`:
+    1.  Tăng \`level\` lên 1.
+    2.  Reset \`xp\` về 0.
+    3.  Tăng \`xpToNextLevel\` (ví dụ: \`xpToNextLevel * 1.5\`).
+    4.  **PHẦN THƯỞNG LÊN CẤP (BẮT BUỘC):** Bạn phải thưởng cho người chơi. Mô tả sự kiện này trong \`description\`. Chọn MỘT trong hai:
+        *   **Nâng cấp Nội tại:** Thông báo cho người chơi về một lợi ích mới qua \`specialSkillLearnedNotification\`. Ví dụ: "Cấp 2 Thuần Thú: Tăng nhẹ tỉ lệ thuần hóa thành công." hoặc "Cấp 2 Tử Linh: Đệ tử bất tử của bạn có thêm máu."
+        *   **Kỹ năng Mới:** Thêm một kỹ năng hoàn toàn mới (bạn tự tạo ra) vào \`updatedSkills\` và thông báo qua \`skillLearnedNotification\`. Ví dụ: "[Kỹ năng] Tiếng Gọi Hoang Dã" hoặc "[Kỹ năng] Củng Cố Bất Tử".
+*   **Xử lý Thuần Hóa/Gọi Hồn:** Bạn chỉ xử lý các nỗ lực thuần hóa hoặc gọi hồn bên ngoài chiến đấu. Khi người chơi cố gắng, hãy xác định kết quả trong \`tamingResult\` hoặc \`reanimationResult\`.
 
 **NGOẠI THẦN & TÍN NGƯỠNG:**
 *   **Thực thể:** Khaos (hỗn loạn), Aethel (bí ẩn), Lithos (bất biến).
-*   **TÁC ĐỘNG TINH THẦN:** Sự hiện diện của các Ngoại Thần là quá sức chịu đựng đối với tâm trí người phàm. Khi người chơi tiếp xúc trực tiếp với một Ngoại Thần, ở trong khu vực ảnh hưởng nặng nề của chúng, hoặc chứng kiến các hiện tượng phi tự nhiên do chúng gây ra, hãy gây ra một lượng lớn sát thương Tinh thần (sử dụng 'san' trong \`statChanges\`, ví dụ: -15, -25). **Ở độ khó cao, lượng sát thương này CÀNG LỚN HƠN.**
-*   **NHẬN ẤN KÝ & XUNG ĐỘT:** Người chơi nhận Ấn Ký qua nghi lễ hoặc khi hành động của họ thu hút sự chú ý. Xung đột giữa Ngoại Thần và các vị thần cũ sẽ gây ra hậu quả tiêu cực ("Dấu ấn dụ quái").
-*   **THĂNG CẤP ẤN KÝ:** Khi \`markLevel\` của người chơi tăng lên, bạn BẮT BUỘC phải đặt đối tượng \`markLevelUpEvent\` trong phản hồi. \`description\` phải thật hoành tráng. KHÔNG cung cấp bất kỳ lựa chọn nào trong \`choices\`. Trò chơi sẽ hiển thị một màn hình đặc biệt. Lượt tiếp theo, người chơi sẽ phản hồi với một hành động như "[LÊN CẤP ẤN KÝ] Tôi chọn Con Đường [Tên Con Đường] cho [Tên Thần]." Bạn phải xử lý lựa chọn này:
-    *   **Sức Mạnh:** Ban cho họ một sự gia tăng chỉ số vĩnh viễn (ví dụ: +5 maxHp) qua \`statChanges\`.
-    *   **Quyền Năng:** Ban cho họ một kỹ năng/phép thuật mới, phù hợp với vị thần đó, qua \`updatedSkills\` và tạo \`skillLearnedNotification\`.
-    *   **Ảnh Hưởng:** Thêm một tín đồ mới vào \`updatedSanctuary\`.
-*   **QUẢN LÝ THÁNH ĐỊA:** Người chơi có thể ra lệnh như "[THÁNH ĐỊA] Giao cho [Tên Tín Đồ] nhiệm vụ [Tên Nhiệm Vụ]." Bạn phải xử lý việc này bằng cách cập nhật trạng thái của tín đồ trong \`updatedSanctuary\` và mô tả hành động đó.
-*   **CẬP NHẬT TÍN NGƯỠNG:** Sử dụng \`updatedFaith\` để thay đổi điểm tín ngưỡng và cấp độ Ấn Ký của người chơi. Sử dụng \`faithNotification\` để thông báo rõ ràng về các thay đổi liên quan đến tín ngưỡng.`;
+*   **TÁC ĐỘNG TINH THẦN:** Tiếp xúc với Ngoại Thần gây sát thương Tinh thần ('san' trong \`statChanges\`).
+*   **THĂNG CẤP ẤN KÝ:** Khi \`markLevel\` tăng, đặt \`markLevelUpEvent\`. KHÔNG cung cấp \`choices\`. Ở lượt tiếp theo, người chơi sẽ chọn Con Đường. Dựa vào lựa chọn đó, hãy ban cho họ Sức Mạnh (\`statChanges\`), Quyền Năng (\`updatedSkills\`), hoặc Ảnh Hưởng (\`updatedSanctuary\`).
+*   **QUẢN LÝ THÁNH ĐỊA:** Xử lý các lệnh quản lý Thánh Địa bằng cách cập nhật \`updatedSanctuary\`.
+*   **CẬP NHẬT TÍN NGƯỠNG:** Sử dụng \`updatedFaith\` và \`faithNotification\` để thông báo thay đổi.`;
 
 
 const COMBAT_SYSTEM_INSTRUCTION = `Bạn là một AI Chiến Thuật Gia, chỉ xử lý một lượt chiến đấu trong một RPG.
@@ -1414,13 +1441,46 @@ const InventoryDisplay = ({ inventory }) => {
 };
 
 const ProficiencyDisplay = ({ character }) => {
+  const specialSkillColors = {
+    'BeastTaming': 'bg-orange-500',
+    'Necromancy': 'bg-purple-600',
+  };
+  const specialSkillNames = {
+      'BeastTaming': 'Thuần Thú Sư',
+      'Necromancy': 'Tử Linh Sư',
+  };
+
   return React.createElement("div", {
     className: "p-4 text-sm"
   }, React.createElement("h3", {
     className: "font-bold text-gray-300 text-xl mb-4 text-center sr-only"
   }, "Thông Thạo"), React.createElement("div", {
     className: "space-y-6"
-  }, React.createElement("div", null, React.createElement("h4", {
+  }, Object.keys(character.specialSkills).some(key => character.specialSkills[key].unlocked) && React.createElement("div", null, React.createElement("h4", {
+    className: "font-semibold text-cyan-400 mb-3 text-lg"
+  }, "Kỹ Năng Đặc Biệt"), React.createElement("div", {
+    className: "flex flex-col gap-3"
+  }, Object.entries(character.specialSkills).filter(([, prof]) => prof.unlocked).map(([type, prof]) => React.createElement("div", {
+    key: type,
+    className: "bg-black/20 p-3 rounded-md border border-gray-700/50"
+  }, React.createElement("div", {
+    className: "flex justify-between items-center mb-1"
+  }, React.createElement("span", {
+    className: "text-gray-200 font-bold"
+  }, specialSkillNames[type] || type), React.createElement("span", {
+    className: "text-gray-400 text-xs font-semibold"
+  }, "Cấp ", prof.level)), React.createElement("div", {
+    className: "w-full bg-gray-700/50 rounded-full h-2 border border-gray-600/50"
+  }, React.createElement("div", {
+    className: `${specialSkillColors[type] || 'bg-cyan-500'} h-full rounded-full`,
+    style: {
+      width: `${prof.xp / prof.xpToNextLevel * 100}%`
+    }
+  })), React.createElement("p", {
+    className: "text-right text-xs text-gray-500 mt-1"
+  }, prof.xp, " / ", prof.xpToNextLevel, " XP"))))), React.createElement("div", {
+    className: "pt-6 border-t border-gray-800"
+  }, React.createElement("h4", {
     className: "font-semibold text-red-400 mb-3 text-lg"
   }, "Vũ Khí"), React.createElement("div", {
     className: "flex flex-col gap-3"
@@ -1844,11 +1904,11 @@ const StartScreen = ({
     className: "text-sm text-gray-400 list-disc list-inside space-y-2 bg-black/20 p-4 rounded-md border border-gray-700/50"
   }, React.createElement("li", null, React.createElement("span", {
     className: "font-semibold text-gray-300"
+  }, "Hệ Thống Kỹ Năng Tiến Triển:"), " Các kỹ năng đặc biệt như Tử Linh Sư và Thuần Thú Sư giờ đây có thể được rèn luyện và lên cấp!"), React.createElement("li", null, React.createElement("span", {
+    className: "font-semibold text-gray-300"
   }, "Quản lý Nguồn AI:"), " Giờ bạn có thể sử dụng API Key của riêng mình. Nhấn nút 'Quản Lý Nguồn AI' bên dưới."), React.createElement("li", null, React.createElement("span", {
     className: "font-semibold text-gray-300"
-  }, "Các Ngoại Thần đã thức tỉnh:"), " Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos)."), React.createElement("li", null, React.createElement("span", {
-    className: "font-semibold text-gray-300"
-  }, "Hệ Thống Ấn Ký Mới:"), " Nhận được Ấn Ký từ các Ngoại Thần thông qua nghi lễ hoặc khi hành động của bạn thu hút sự chú ý của chúng. Mỗi Ấn Ký đều có hai mặt."))), React.createElement("div", {
+  }, "Các Ngoại Thần đã thức tỉnh:"), " Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos)."))), React.createElement("div", {
     className: "mt-8 pt-4 border-t border-gray-800 w-full max-w-sm flex flex-col items-center justify-center gap-4"
   }, React.createElement("button", {
     onClick: onOpenAiManager,
@@ -1976,7 +2036,8 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
       acc[profName] = {
         level: isOriginProficiency ? 2 : 1,
         xp: 0,
-        xpToNextLevel: isOriginProficiency ? 150 : 100
+        xpToNextLevel: isOriginProficiency ? 150 : 100,
+        unlocked: true,
       };
       return acc;
     }, {});
@@ -1984,7 +2045,8 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
       acc[school] = {
         level: 1,
         xp: 0,
-        xpToNextLevel: 100
+        xpToNextLevel: 100,
+        unlocked: true,
       };
       return acc;
     }, {});
@@ -2026,6 +2088,10 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
       knownRecipeIds: selectedOrigin.startingRecipes || [],
       weaponProficiencies: weaponProficiencies,
       magicMasteries: magicMasteries,
+      specialSkills: {
+          BeastTaming: { level: 0, xp: 0, xpToNextLevel: 100, unlocked: false },
+          Necromancy: { level: 0, xp: 0, xpToNextLevel: 100, unlocked: false }
+      },
       faith: initialFaith,
       sanctuary: null,
       journal: initialJournal,
@@ -2470,7 +2536,7 @@ const App = () => {
   const [creationMode, setCreationMode] = useState('standard');
   const [isAiManagerOpen, setIsAiManagerOpen] = useState(false);
   const WORLD_EVENT_TURN_INTERVAL = 5;
-  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v6'; // Updated version key
+  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v7'; // Updated version key
   const SETTINGS_KEY = 'echoes_of_ruin_settings_v1';
   const HUNGER_PER_TURN = 2;
   const THIRST_PER_TURN = 3;
@@ -2547,9 +2613,11 @@ const App = () => {
     charToUpdate.bodyParts = applyBodyPartChanges(charToUpdate.bodyParts, scene.bodyPartChanges);
     charToUpdate.weaponProficiencies = applyWeaponProficiencyUpdates(charToUpdate.weaponProficiencies, scene.updatedWeaponProficiencies);
     charToUpdate.magicMasteries = applyMagicMasteryUpdates(charToUpdate.magicMasteries, scene.updatedMagicMasteries);
+    charToUpdate.specialSkills = applySpecialSkillUpdates(charToUpdate.specialSkills, scene.updatedSpecialSkills);
     charToUpdate.faith = applyFaithUpdates(charToUpdate.faith, scene.updatedFaith);
     charToUpdate.sanctuary = applySanctuaryUpdate(charToUpdate.sanctuary, scene.updatedSanctuary);
-    if (scene.updatedSkills) charToUpdate.skills = scene.updatedSkills;
+    if (scene.updatedSkills) charToUpdate.skills = [...charToUpdate.skills, ...scene.updatedSkills.filter(newSkill => !charToUpdate.skills.some(existing => existing.id === newSkill.id))];
+
     const {
       updatedIds,
       learnedRecipeNames
@@ -2707,6 +2775,10 @@ const App = () => {
           xpToNextLevel: 100
         }
       }), {}),
+      specialSkills: {
+          BeastTaming: { level: 0, xp: 0, xpToNextLevel: 100, unlocked: false },
+          Necromancy: { level: 0, xp: 0, xpToNextLevel: 100, unlocked: false }
+      },
       faith: ALL_DEITIES.reduce((acc, d) => ({ ...acc,
         [d]: {
           markLevel: 0,
