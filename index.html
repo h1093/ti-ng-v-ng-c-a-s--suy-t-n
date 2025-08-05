@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="vi" class="dark">
   <head>
@@ -1450,13 +1451,15 @@ const ProficiencyDisplay = ({ character }) => {
       'Necromancy': 'Tử Linh Sư',
   };
 
+  const hasSpecialSkills = Object.keys(character.specialSkills).some(key => character.specialSkills[key].unlocked);
+
   return React.createElement("div", {
     className: "p-4 text-sm"
   }, React.createElement("h3", {
     className: "font-bold text-gray-300 text-xl mb-4 text-center sr-only"
   }, "Thông Thạo"), React.createElement("div", {
     className: "space-y-6"
-  }, Object.keys(character.specialSkills).some(key => character.specialSkills[key].unlocked) && React.createElement("div", null, React.createElement("h4", {
+  }, hasSpecialSkills && React.createElement("div", null, React.createElement("h4", {
     className: "font-semibold text-cyan-400 mb-3 text-lg"
   }, "Kỹ Năng Đặc Biệt"), React.createElement("div", {
     className: "flex flex-col gap-3"
@@ -1479,7 +1482,7 @@ const ProficiencyDisplay = ({ character }) => {
   })), React.createElement("p", {
     className: "text-right text-xs text-gray-500 mt-1"
   }, prof.xp, " / ", prof.xpToNextLevel, " XP"))))), React.createElement("div", {
-    className: "pt-6 border-t border-gray-800"
+    className: hasSpecialSkills ? "pt-6 border-t border-gray-800" : ""
   }, React.createElement("h4", {
     className: "font-semibold text-red-400 mb-3 text-lg"
   }, "Vũ Khí"), React.createElement("div", {
@@ -1505,7 +1508,7 @@ const ProficiencyDisplay = ({ character }) => {
   }, prof.xp, " / ", prof.xpToNextLevel, " XP"))))), React.createElement("div", {
     className: "pt-6 border-t border-gray-800"
   }, React.createElement("h4", {
-    className: "font-semibold text-red-400 mb-3 text-lg"
+    className: "font-semibold text-blue-400 mb-3 text-lg"
   }, "Phép Thuật"), React.createElement("div", {
     className: "flex flex-col gap-3"
   }, Object.entries(character.magicMasteries).map(([school, prof]) => React.createElement("div", {
@@ -2236,7 +2239,7 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
   }, "Cần chọn tên, nguồn gốc, thiên phú, tính cách và dùng hết điểm (trừ khi ở God Mode). Nếu ở chế độ tùy chỉnh, hãy điền kịch bản.")));
 };
 
-const GameScreen = ({ character, scene, loading, onChoice }) => {
+const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
   const [customAction, setCustomAction] = useState('');
   const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [isCraftingOpen, setIsCraftingOpen] = useState(false);
@@ -2352,7 +2355,9 @@ const GameScreen = ({ character, scene, loading, onChoice }) => {
     className: "text-center p-2 bg-black/30 rounded-lg border border-gray-700"
   }, React.createElement("h3", {
     className: "text-xl font-bold text-red-500"
-  }, character.name), character.godMode && React.createElement("div", {
+  }, character.name), React.createElement("p", {
+    className: "text-base text-gray-300 font-semibold mt-1"
+  }, `Lượt: ${turnCount}`), character.godMode && React.createElement("div", {
     className: "mt-1 text-sm font-bold text-yellow-400 border border-yellow-500 bg-yellow-900/30 py-1 rounded-md"
   }, "Ý Chí Sáng Thế")), React.createElement(SidePanelAccordion, {
     title: "Trạng Thái Cơ Thể",
@@ -2867,7 +2872,8 @@ const App = () => {
           character: character,
           scene: currentScene,
           loading: loading,
-          onChoice: handleChoice
+          onChoice: handleChoice,
+          turnCount: turnCount
         }) : React.createElement(LoadingSpinner, null);
       case 'GAME_OVER':
         return React.createElement(GameOverScreen, {
