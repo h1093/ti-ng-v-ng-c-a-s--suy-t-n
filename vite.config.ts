@@ -1,3 +1,4 @@
+
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig, loadEnv } from 'vite';
@@ -15,6 +16,18 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+        }
+      },
+      build: {
+        rollupOptions: {
+          external: [
+            "react",
+            "react-dom/client",
+            "@google/genai",
+            "vite",
+            "path",
+            "url"
+          ]
         }
       }
     };
