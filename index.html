@@ -1,5 +1,4 @@
 
-
 <!DOCTYPE html>
 <html lang="vi" class="dark">
   <head>
@@ -2239,23 +2238,27 @@ const CharacterCreationScreen = ({ onFinish, mode }) => {
   }, "Cần chọn tên, nguồn gốc, thiên phú, tính cách và dùng hết điểm (trừ khi ở God Mode). Nếu ở chế độ tùy chỉnh, hãy điền kịch bản.")));
 };
 
-const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
+const GameScreen = ({ character, scene, loading, onChoice, turnCount, onSave, onExit }) => {
   const [customAction, setCustomAction] = useState('');
   const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [isCraftingOpen, setIsCraftingOpen] = useState(false);
   const [isCharacterDetailsOpen, setIsCharacterDetailsOpen] = useState(false);
   const [markLevelUpEvent, setMarkLevelUpEvent] = useState(null);
+  const [saveState, setSaveState] = useState('idle');
   const mainContentRef = useRef(null);
+
   useEffect(() => {
     if (scene.markLevelUpEvent) {
       setMarkLevelUpEvent(scene.markLevelUpEvent);
     }
   }, [scene.markLevelUpEvent]);
+
   useEffect(() => {
     if (mainContentRef.current) {
       mainContentRef.current.scrollTop = 0;
     }
   }, [scene.description]);
+
   const handleCustomActionSubmit = e => {
     e.preventDefault();
     if (customAction.trim() && !loading) {
@@ -2263,6 +2266,7 @@ const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
       setCustomAction('');
     }
   };
+
   const handleTargetPart = (enemyId, part) => {
     const enemy = scene.enemies?.find(e => e.id === enemyId);
     if (enemy && !loading) {
@@ -2292,28 +2296,58 @@ const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
       onChoice(`Tấn công ${partNameVI} của ${enemy.name}`);
     }
   };
+
   const handleCraft = recipe => {
     setIsCraftingOpen(false);
     onChoice(`[HÀNH ĐỘNG] Chế tạo ${recipe.name}.`);
   };
+
   const handleSanctuaryAction = action => {
     setIsCharacterDetailsOpen(false);
     onChoice(action);
   };
+
   const handlePathSelection = path => {
     if (markLevelUpEvent) {
       onChoice(`[LÊN CẤP ẤN KÝ] Tôi chọn Con Đường ${path} cho ${markLevelUpEvent.deity}.`);
       setMarkLevelUpEvent(null);
     }
   };
+  
+  const handleManualSave = () => {
+    if (loading || saveState !== 'idle') return;
+    setSaveState('saving');
+    onSave();
+    setTimeout(() => {
+        setSaveState('saved');
+        setTimeout(() => {
+            setSaveState('idle');
+        }, 1500);
+    }, 200);
+  };
+  
+  const handleExitClick = () => {
+    if (confirm("Bạn có chắc muốn thoát ra menu chính không? Tiến trình của bạn được lưu tự động mỗi lượt.")) {
+      onExit();
+    }
+  };
+
   const sanityPercentage = useMemo(() => {
     return character.stats.san / character.stats.maxSan * 100;
   }, [character.stats.san, character.stats.maxSan]);
+
   const screenEffectStyle = {
     '--sanity-factor': (100 - sanityPercentage) / 100,
     '--shake-intensity': sanityPercentage < 40 ? `${Math.min(2, (40 - sanityPercentage) / 20)}px` : '0px',
     '--vignette-opacity': sanityPercentage < 50 ? `${(50 - sanityPercentage) / 100}` : '0'
   };
+
+  const saveButtonText = {
+      idle: 'Lưu',
+      saving: 'Đang lưu...',
+      saved: 'Đã lưu!'
+  };
+  
   const SanityEffects = () => {
     if (sanityPercentage >= 50) return null;
     return React.createElement(React.Fragment, null, React.createElement("div", {
@@ -2331,6 +2365,7 @@ const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
     if (character.stats[skill.costType] < skill.costAmount) return `Không đủ ${skill.costType.toUpperCase()}`;
     return null;
   };
+
   return React.createElement(React.Fragment, null, React.createElement(SanityEffects, null), isJournalOpen && React.createElement(Journal, {
     journal: character.journal,
     onClose: () => setIsJournalOpen(false)
@@ -2507,7 +2542,7 @@ const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
     disabled: loading || !customAction.trim(),
     className: "flex-shrink-0 bg-transparent border-2 border-red-600 text-red-500 font-bold py-3 px-6 rounded-sm hover:bg-red-600 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed disabled:border-gray-600 disabled:text-gray-500 disabled:hover:bg-transparent"
   }, "Gửi")), React.createElement("div", {
-    className: "grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4"
+    className: "grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4"
   }, React.createElement("button", {
     onClick: () => setIsCharacterDetailsOpen(true),
     disabled: loading,
@@ -2526,7 +2561,15 @@ const GameScreen = ({ character, scene, loading, onChoice, turnCount }) => {
     onClick: () => setIsJournalOpen(true),
     disabled: loading,
     className: "w-full bg-transparent border-2 border-blue-500 text-blue-400 font-bold py-3 px-4 rounded-sm hover:bg-blue-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-  }, "Nhật Ký")))))));
+  }, "Nhật Ký"), React.createElement("button", {
+    onClick: handleManualSave,
+    disabled: loading || saveState !== 'idle',
+    className: "w-full bg-transparent border-2 border-yellow-500 text-yellow-400 font-bold py-3 px-4 rounded-sm hover:bg-yellow-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+  }, saveButtonText[saveState]), React.createElement("button", {
+    onClick: handleExitClick,
+    disabled: loading,
+    className: "w-full bg-transparent border-2 border-gray-500 text-gray-400 font-bold py-3 px-4 rounded-sm hover:bg-gray-500 hover:text-black transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+  }, "Thoát")))))));
 };
 
 const App = () => {
@@ -2545,6 +2588,23 @@ const App = () => {
   const SETTINGS_KEY = 'echoes_of_ruin_settings_v1';
   const HUNGER_PER_TURN = 2;
   const THIRST_PER_TURN = 3;
+
+  const manualSaveGame = useCallback(() => {
+    if (character && gameState === 'PLAYING') {
+      try {
+        const gameStateToSave = {
+          character,
+          turnCount,
+          currentScene
+        };
+        localStorage.setItem(SAVE_GAME_KEY, JSON.stringify(gameStateToSave));
+        setHasSave(true);
+      } catch (error) {
+        console.error("Failed to save game:", error);
+      }
+    }
+  }, [character, turnCount, gameState, currentScene]);
+
   useEffect(() => {
     try {
       const savedGame = localStorage.getItem(SAVE_GAME_KEY);
@@ -2845,6 +2905,9 @@ const App = () => {
     setLoading(false);
     setTurnCount(0);
   };
+  const handleExit = () => {
+    setGameState('START_SCREEN');
+  };
   const renderContent = () => {
     switch (gameState) {
       case 'START_SCREEN':
@@ -2873,7 +2936,9 @@ const App = () => {
           scene: currentScene,
           loading: loading,
           onChoice: handleChoice,
-          turnCount: turnCount
+          turnCount: turnCount,
+          onSave: manualSaveGame,
+          onExit: handleExit
         }) : React.createElement(LoadingSpinner, null);
       case 'GAME_OVER':
         return React.createElement(GameOverScreen, {
