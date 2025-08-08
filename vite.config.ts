@@ -18,17 +18,5 @@ export default defineConfig(({ mode }) => {
           '@': path.resolve(__dirname, '.'),
         }
       },
-      build: {
-        rollupOptions: {
-          external: [
-            "react",
-            "react-dom/client",
-            "@google/genai",
-            "vite",
-            "path",
-            "url"
-          ]
-        }
-      }
     };
 });
