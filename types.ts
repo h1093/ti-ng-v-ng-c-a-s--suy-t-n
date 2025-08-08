@@ -1,7 +1,8 @@
 
+
 // From craftingData
 export interface RecipeMaterial {
-  name: string;
+  itemId: string;
   quantity: number;
 }
 
@@ -11,10 +12,38 @@ export interface Recipe {
   description: string;
   materials: RecipeMaterial[];
   result: {
-    name: string;
+    itemId: string;
     quantity: number;
   };
 }
+
+// From itemData
+export type ItemEffect = 
+    | { type: 'HEAL'; stat: 'hp' | 'san' | 'stamina' | 'mana'; amount: number }
+    | { type: 'CURE'; effect: string } // e.g. cure 'poison'
+    | { type: 'LEARN_SKILL'; skillId: string }
+    | { type: 'LEARN_RECIPE'; recipeId: string };
+
+export interface Item {
+    id: string;
+    name: string;
+    description: string;
+    type: 'consumable' | 'book' | 'material' | 'weapon' | 'armor' | 'misc';
+    usable: boolean;
+    effects?: ItemEffect[];
+}
+
+// System Action - A discriminated union for type safety
+export interface SanctuaryActionPayload { followerName: string; task: string; }
+export interface ChooseLevelUpPathPayload { deity: string; path: string; }
+
+export type SystemAction = 
+    | { type: 'USE_ITEM', payload: { itemId: string } }
+    | { type: 'CRAFT_ITEM', payload: { recipeId: string } }
+    | { type: 'SANCTUARY_ACTION', payload: SanctuaryActionPayload }
+    | { type: 'CHOOSE_LEVEL_UP_PATH', payload: ChooseLevelUpPathPayload };
+
+
 
 // From loreData
 export interface LoreEntry {
@@ -23,7 +52,13 @@ export interface LoreEntry {
   content: string;
 }
 
-// From characterData
+// From deityData
+export interface DeityData {
+    name: string;
+    powerPathSkillId: string;
+}
+
+// From characterData & skillData
 export interface Difficulty {
   name: string;
   description: string;
@@ -36,6 +71,14 @@ export interface Talent {
     description: string;
 }
 
+export type SkillEffect = 
+    | { type: 'DAMAGE'; baseAmount: number; damageType: 'physical' | 'arcane' | 'abyss' | 'holy' | 'mental' }
+    | { type: 'HEAL'; baseAmount: number; target: 'self' }
+    | { type: 'BUFF_STAT'; stat: 'attack' | 'defense'; multiplier: number; duration: number }
+    | { type: 'DEBUFF_STAT'; stat: 'attack' | 'defense' | 'speed'; multiplier: number; duration: number; chance?: number }
+    | { type: 'APPLY_STATUS'; status: 'blinded' | 'stunned'; chance: number; duration: number };
+
+
 export interface Skill {
     id: string;
     name: string;
@@ -45,17 +88,18 @@ export interface Skill {
     cooldown: number;
     currentCooldown: number;
     school?: string;
+    effects: SkillEffect[];
 }
 
 export interface Origin {
   name: string;
   description: string;
   baseStats: Partial<Record<keyof CharacterStats, number>>;
-  startingEquipment: Record<string, number>;
+  startingEquipment: Record<string, number>; // Key is itemId
   weaponProficiency: string;
   startingRecipes?: string[];
   talents: Talent[];
-  startingSkills: Omit<Skill, 'currentCooldown'>[];
+  startingSkills: string[]; // Now an array of skill IDs
 }
 
 export interface Personality {
@@ -104,7 +148,7 @@ export interface FaithStatus {
 export interface Follower {
     name: string;
     loyalty: number;
-    status: string;
+    status: string; // e.g., 'Idle', 'Scavenging', 'Patrolling'
 }
 
 export interface Sanctuary {
@@ -150,7 +194,7 @@ export interface Character {
   thirst: number;
   maxThirst: number;
   reputation: number;
-  inventory: Record<string, number>;
+  inventory: Record<string, number>; // Key is itemId
   skills: Skill[];
   knownRecipeIds: string[];
   weaponProficiencies: Record<string, Proficiency>;
@@ -196,7 +240,7 @@ export interface NPC {
 }
 
 export interface InventoryChange {
-    itemName: string;
+    itemName: string; // Stays as itemName for AI convenience, will be mapped to ID by system if needed
     quantity: number;
 }
 
@@ -242,6 +286,12 @@ export interface JournalUpdate {
     content: string;
 }
 
+export interface XpAward {
+    type: 'weapon' | 'magic' | 'special';
+    name: string;
+    amount: number;
+}
+
 
 export interface Scene {
     description: string;
@@ -255,16 +305,9 @@ export interface Scene {
     gameOver: boolean;
     reason?: string;
     endingKey?: string;
-    updatedSkills?: Skill[];
-    newlyLearnedRecipes?: Recipe[];
-    updatedWeaponProficiencies?: { name: string; proficiency: Proficiency }[];
-    updatedMagicMasteries?: { name: string; proficiency: Proficiency }[];
-    updatedSpecialSkills?: SpecialSkillUpdate[];
-    specialSkillLearnedNotification?: string;
-    xpGains?: string[];
-    levelupNotification?: string;
-    skillLearnedNotification?: string;
-    recipeLearnedNotification?: string;
+    newlyLearnedSkillIds?: string[];
+    newlyLearnedRecipeIds?: string[]; // Changed from newlyLearnedRecipes
+    xpAwards?: XpAward[];
     updatedFaith?: { name: string; status: FaithStatus }[];
     updatedSanctuary?: Sanctuary;
     faithNotification?: string;

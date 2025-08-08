@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { LoadingSpinner } from './LoadingSpinner';
 import { generateBackstory } from '../services/geminiService';
-import { Character, CharacterStats } from '../types';
+import { Character, CharacterStats, Origin, Personality as PersonalityType, Difficulty, Skill } from '../types';
 import { 
     DIFFICULTIES, 
     ORIGINS, 
@@ -11,6 +11,8 @@ import {
     ALL_MAGIC_SCHOOLS,
     ALL_DEITIES
 } from '../data/characterData';
+import { SKILL_DEFINITIONS } from '../data/skillData';
+import { ITEM_DEFINITIONS } from '../data/itemData';
 
 interface CharacterCreationScreenProps {
   onFinish: (character: Character) => void;
@@ -33,18 +35,18 @@ export const CharacterCreationScreen: React.FC<CharacterCreationScreenProps> = (
   const [customScenario, setCustomScenario] = useState('');
   const [godMode, setGodMode] = useState(false);
   
-  const [selectedDifficulty, setSelectedDifficulty] = useState(DIFFICULTIES[0]);
-  const [selectedOrigin, setSelectedOrigin] = useState<typeof ORIGINS[0] | null>(null);
-  const [selectedTalent, setSelectedTalent] = useState<typeof ORIGINS[0]['talents'][0] | null>(null);
-  const [selectedPersonality, setSelectedPersonality] = useState<typeof PERSONALITIES[0] | null>(null);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<Difficulty>(DIFFICULTIES[0]);
+  const [selectedOrigin, setSelectedOrigin] = useState<Origin | null>(null);
+  const [selectedTalent, setSelectedTalent] = useState<Origin['talents'][0] | null>(null);
+  const [selectedPersonality, setSelectedPersonality] = useState<PersonalityType | null>(null);
   const [spentPoints, setSpentPoints] = useState<Partial<Record<keyof CharacterStats, number>>>({});
 
-  const handleDifficultyChange = (d: typeof DIFFICULTIES[0]) => {
+  const handleDifficultyChange = (d: Difficulty) => {
     setSelectedDifficulty(d);
     setSpentPoints({});
   };
 
-  const handleOriginChange = (o: typeof ORIGINS[0]) => {
+  const handleOriginChange = (o: Origin) => {
     setSelectedOrigin(o);
     setSelectedTalent(null); 
   };
@@ -103,6 +105,30 @@ export const CharacterCreationScreen: React.FC<CharacterCreationScreenProps> = (
       alert("Vui lòng hoàn thành tất cả các lựa chọn, sử dụng hết điểm phân bổ và điền kịch bản tùy chỉnh (nếu có).");
       return;
     }
+
+    const startingSkills = selectedOrigin.startingSkills
+      .map(skillId => SKILL_DEFINITIONS[skillId])
+      .filter(Boolean)
+      .map(skillDef => ({ ...skillDef, currentCooldown: 0 }));
+
+    const initialInventory = { ...selectedOrigin.startingEquipment };
+    
+    // System-logic: Automatically learn skills from starting books
+    Object.keys(initialInventory).forEach(itemId => {
+        const itemDef = ITEM_DEFINITIONS[itemId];
+        if (itemDef?.type === 'book' && itemDef.effects) {
+            itemDef.effects.forEach(effect => {
+                if(effect.type === 'LEARN_SKILL') {
+                    const skillDef = SKILL_DEFINITIONS[effect.skillId];
+                    if(skillDef && !startingSkills.some(s => s.id === skillDef.id)) {
+                        startingSkills.push({ ...skillDef, currentCooldown: 0 });
+                    }
+                }
+            });
+        }
+    });
+
+
     const character: Character = {
       name: name.trim(),
       gender,
@@ -116,8 +142,8 @@ export const CharacterCreationScreen: React.FC<CharacterCreationScreenProps> = (
       hunger: 100, maxHunger: 100,
       thirst: 100, maxThirst: 100,
       reputation: selectedPersonality?.name === "Tàn nhẫn" ? -10 : 0,
-      inventory: { ...selectedOrigin.startingEquipment },
-      skills: selectedOrigin.startingSkills.map(skill => ({ ...skill, currentCooldown: 0 })),
+      inventory: initialInventory,
+      skills: startingSkills,
       knownRecipeIds: selectedOrigin.startingRecipes || [],
       weaponProficiencies: ALL_WEAPON_PROFICIENCIES.reduce((acc, profName) => {
         acc[profName] = { level: profName === selectedOrigin.weaponProficiency ? 2 : 1, xp: 0, xpToNextLevel: profName === selectedOrigin.weaponProficiency ? 150 : 100, unlocked: true };
@@ -221,12 +247,16 @@ export const CharacterCreationScreen: React.FC<CharacterCreationScreenProps> = (
             </div>
             <div className="mt-4">
                 <h4 className="font-bold text-gray-400">Kỹ năng khởi đầu:</h4>
-                {selectedOrigin.startingSkills.map(s => (
-                    <div key={s.id} className="p-2 bg-gray-900/50 rounded mt-1">
-                        <p className="font-semibold text-red-400">{s.name}</p>
-                        <p className="text-xs text-gray-400">{s.description}</p>
-                    </div>
-                ))}
+                {selectedOrigin.startingSkills.map(skillId => {
+                    const skill = SKILL_DEFINITIONS[skillId];
+                    if (!skill) return null;
+                    return (
+                        <div key={skill.id} className="p-2 bg-gray-900/50 rounded mt-1">
+                            <p className="font-semibold text-red-400">{skill.name}</p>
+                            <p className="text-xs text-gray-400">{skill.description}</p>
+                        </div>
+                    )
+                })}
             </div>
         </>
       ))}

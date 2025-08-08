@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { MarkLevelUpEvent } from '../types';
+import { MarkLevelUpEvent, SystemAction } from '../types';
 
 const deityColors: Record<string, { text: string; bg: string; border: string }> = {
     'Sylvian': { text: 'text-green-300', bg: 'bg-green-700/50', border: 'border-green-500' },
@@ -19,11 +18,21 @@ const PATHS = [
 
 interface MarkLevelUpModalProps {
     event: MarkLevelUpEvent;
-    onSelectPath: (path: string) => void;
+    onSystemAction: (action: SystemAction) => void;
 }
 
-export const MarkLevelUpModal: React.FC<MarkLevelUpModalProps> = ({ event, onSelectPath }) => {
+export const MarkLevelUpModal: React.FC<MarkLevelUpModalProps> = ({ event, onSystemAction }) => {
     const colors = deityColors[event.deity] || { text: 'text-gray-300', bg: 'bg-gray-700/50', border: 'border-gray-500' };
+
+    const handleSelectPath = (pathName: string) => {
+        onSystemAction({
+            type: 'CHOOSE_LEVEL_UP_PATH',
+            payload: {
+                deity: event.deity,
+                path: pathName
+            }
+        });
+    };
 
     return (
         <div 
@@ -44,7 +53,7 @@ export const MarkLevelUpModal: React.FC<MarkLevelUpModalProps> = ({ event, onSel
                         {PATHS.map(path => (
                             <button
                                 key={path.name}
-                                onClick={() => onSelectPath(path.name)}
+                                onClick={() => handleSelectPath(path.name)}
                                 className={`flex flex-col items-center p-6 text-center border-2 ${colors.border} rounded-lg bg-black/30 hover:bg-black/60 hover:shadow-lg hover:shadow-current transition-all duration-300 transform hover:-translate-y-1`}
                             >
                                 <span className="text-5xl mb-4">{path.icon}</span>

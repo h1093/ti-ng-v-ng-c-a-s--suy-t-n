@@ -1,16 +1,21 @@
-
 import React from 'react';
-import { Sanctuary } from '../types';
+import { Sanctuary, SystemAction } from '../types';
 
 interface SanctuaryDisplayProps {
     sanctuary: Sanctuary;
-    onAction: (action: string) => void;
+    onSystemAction: (action: SystemAction) => void;
 }
 
-export const SanctuaryDisplay: React.FC<SanctuaryDisplayProps> = ({ sanctuary, onAction }) => {
+export const SanctuaryDisplay: React.FC<SanctuaryDisplayProps> = ({ sanctuary, onSystemAction }) => {
 
     const handleAction = (followerName: string, task: string) => {
-        onAction(`[THÁNH ĐỊA] Giao cho ${followerName} nhiệm vụ ${task}.`);
+        onSystemAction({
+            type: 'SANCTUARY_ACTION',
+            payload: {
+                followerName,
+                task
+            }
+        });
     };
 
     return (
@@ -42,10 +47,10 @@ export const SanctuaryDisplay: React.FC<SanctuaryDisplayProps> = ({ sanctuary, o
                                         <p className="text-gray-400 text-sm">Trạng Thái: <span className="italic">{f.status}</span></p>
                                     </div>
                                     <div className="flex flex-col items-end gap-2">
-                                        <button onClick={() => handleAction(f.name, 'Tìm kiếm tài nguyên')} disabled={f.status !== 'Idle'} className="text-xs bg-green-800/70 border border-green-700 text-green-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
+                                        <button onClick={() => handleAction(f.name, 'Scavenging')} disabled={f.status !== 'Idle'} className="text-xs bg-green-800/70 border border-green-700 text-green-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
                                             Tìm Tài Nguyên
                                         </button>
-                                        <button onClick={() => handleAction(f.name, 'Tuần tra Thánh Địa')} disabled={f.status !== 'Idle'} className="text-xs bg-blue-800/70 border border-blue-700 text-blue-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
+                                        <button onClick={() => handleAction(f.name, 'Patrolling')} disabled={f.status !== 'Idle'} className="text-xs bg-blue-800/70 border border-blue-700 text-blue-300 font-semibold py-1 px-3 rounded-sm transition-colors hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed">
                                             Tuần Tra
                                         </button>
                                     </div>

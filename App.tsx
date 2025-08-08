@@ -1,3 +1,5 @@
+
+
 import React, { useState, useCallback, useEffect } from 'react';
 import { StartScreen } from './components/StartScreen';
 import { CharacterCreationScreen } from './components/CharacterCreationScreen';
@@ -6,11 +8,14 @@ import { GameOverScreen } from './components/GameOverScreen';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { AiSourceManagerModal } from './components/AiSourceManagerModal';
 import { generateScene } from './services/geminiService';
-import { processScene, advanceTurn } from './services/characterStateService';
+import { processScene, advanceTurn, handleSystemAction as processSystemAction, handlePlayerSkillUsage } from './services/characterStateService';
 import { getAiConfig, saveAiConfig } from './services/geminiService';
-import { Character, Scene, NPC, Companion } from './types';
+import { Character, Scene, NPC, Companion, Skill, SystemAction, Enemy } from './types';
 import { ORIGINS, DIFFICULTIES, ALL_WEAPON_PROFICIENCIES, ALL_MAGIC_SCHOOLS, ALL_DEITIES } from './data/characterData';
 import { ENDINGS } from './data/endingData';
+import { SKILL_DEFINITIONS } from './data/skillData';
+import { ITEM_DEFINITIONS } from './data/itemData';
+
 
 /**
  * Reconciles the list of NPCs to prevent them from disappearing if the AI forgets to include them.
@@ -56,9 +61,11 @@ const App = () => {
   const [enableGore, setEnableGore] = useState(true);
   const [creationMode, setCreationMode] = useState<'standard' | 'custom'>('standard');
   const [isAiManagerOpen, setIsAiManagerOpen] = useState(false);
+  const [lastSystemMessage, setLastSystemMessage] = useState<string | null>(null);
+
 
   const WORLD_EVENT_TURN_INTERVAL = 5;
-  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v8'; // Updated version key
+  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v9'; // Updated version key
   const SETTINGS_KEY = 'echoes_of_ruin_settings_v1';
 
   const manualSaveGame = useCallback(() => {
@@ -165,6 +172,23 @@ const App = () => {
         setLoading(false);
       }
   }, [handleGameOver]);
+  
+  const handleSystemAction = useCallback((action: SystemAction) => {
+      if (!character || !currentScene) return;
+
+      const { updatedCharacter, notification } = processSystemAction(character, action);
+
+      setCharacter(updatedCharacter);
+      
+      // We don't advance the turn for system actions.
+      // We also update the current scene description with the notification.
+      setCurrentScene(prev => {
+          if (!prev) return null;
+          const newDescription = `${prev.description}\n\n${notification}`;
+          return { ...prev, description: newDescription };
+      });
+
+  }, [character, currentScene]);
 
   const handleChoice = useCallback(async (choice: string) => {
     if (!character || !currentScene) return;
@@ -174,16 +198,35 @@ const App = () => {
     setTurnCount(newTurnCount);
     
     const inCombat = currentScene.enemies && currentScene.enemies.length > 0;
-    const { updatedCharacter, turnInfo } = advanceTurn(character, inCombat);
+    const { updatedCharacter: charAfterTurn, turnInfo } = advanceTurn(character, inCombat);
 
-    let actionForGemini = choice;
+    let charForAI = charAfterTurn;
+    let actionForAI = choice;
+    let enemiesForAI: Enemy[] = currentScene.enemies || [];
+    
+    // --- SYSTEM LOGIC: SKILL USAGE ---
+    const skillUsageMatch = choice.match(/^Sử dụng kỹ năng: (.*)/);
+    if (inCombat && skillUsageMatch) {
+        const skillName = skillUsageMatch[1];
+        const skill = character.skills.find(s => s.name === skillName);
+        if (skill) {
+            // System handles the skill logic
+            const { updatedCharacter, updatedEnemies, notificationLog } = handlePlayerSkillUsage(charAfterTurn, enemiesForAI, skill.id, enemiesForAI[0]?.id);
+            charForAI = updatedCharacter;
+            enemiesForAI = updatedEnemies;
+            // The action for the AI is now a description of what happened
+            actionForAI = notificationLog;
+        }
+    }
+    // --- END SYSTEM LOGIC ---
+
     if (newTurnCount > 0 && newTurnCount % WORLD_EVENT_TURN_INTERVAL === 0 && !inCombat) {
-        actionForGemini += "\n\n[CHỈ THỊ QUẢN TRÒ: Đã đến lúc cho một SỰ KIỆN THẾ GIỚI. Hãy đưa một yếu tố bất ngờ, đáng lo ngại hoặc kỳ lạ vào cảnh này.]";
+        actionForAI += "\n\n[CHỈ THỊ QUẢN TRÒ: Đã đến lúc cho một SỰ KIỆN THẾ GIỚI. Hãy đưa một yếu tố bất ngờ, đáng lo ngại hoặc kỳ lạ vào cảnh này.]";
     }
     
     const previousNpcs = currentScene.npcs || [];
-    const scene = await generateScene(updatedCharacter, actionForGemini, turnInfo, currentScene.enemies, previousNpcs, enableGore);
-    sceneProcessor(scene, updatedCharacter, previousNpcs);
+    const scene = await generateScene(charForAI, actionForAI, turnInfo, enemiesForAI, previousNpcs, enableGore);
+    sceneProcessor(scene, charForAI, previousNpcs);
   }, [character, currentScene, sceneProcessor, turnCount, enableGore]);
 
   const startGame = useCallback(async (newCharacter: Character) => {
@@ -212,6 +255,10 @@ const App = () => {
         };
         return acc;
     }, {} as Record<string, any>);
+    
+    const startingInventory = { ...origin.startingEquipment };
+    startingInventory['healing_salve'] = 5;
+
 
     const defaultCharacter: Character = {
         name: "Chiến Binh Thử Nghiệm",
@@ -224,8 +271,11 @@ const App = () => {
         stats: { hp: 150, maxHp: 150, san: 100, maxSan: 100, mana: 50, maxMana: 50, stamina: 120, maxStamina: 120, attack: 15, defense: 12, speed: 7, charisma: 5 },
         bodyParts: { head: 'Khỏe Mạnh', torso: 'Khỏe Mạnh', leftArm: 'Khỏe Mạnh', rightArm: 'Khỏe Mạnh', leftLeg: 'Khỏe Mạnh', rightLeg: 'Khỏe Mạnh' },
         hunger: 100, maxHunger: 100, thirst: 100, maxThirst: 100, reputation: 0,
-        inventory: { ...origin.startingEquipment, "Thuốc Mỡ Chữa Lành": 5 },
-        skills: origin.startingSkills.map(s => ({ ...s, currentCooldown: 0 })),
+        inventory: startingInventory,
+        skills: origin.startingSkills
+            .map(id => SKILL_DEFINITIONS[id])
+            .filter(Boolean)
+            .map(skillDef => ({ ...skillDef, currentCooldown: 0 })),
         knownRecipeIds: origin.startingRecipes || [],
         weaponProficiencies,
         magicMasteries: ALL_MAGIC_SCHOOLS.reduce((acc, s) => ({ ...acc, [s]: { level: 1, xp: 0, xpToNextLevel: 100, unlocked: true } }), {}),
@@ -323,6 +373,7 @@ const App = () => {
             scene={currentScene}
             loading={loading}
             onChoice={handleChoice}
+            onSystemAction={handleSystemAction}
             turnCount={turnCount}
             onSave={manualSaveGame}
             onExit={handleExit}

@@ -1,11 +1,12 @@
 
 import React from 'react';
 import { Character, Recipe } from '../types';
+import { ITEM_DEFINITIONS } from '../data/itemData';
 
 interface CraftingModalProps {
     character: Character;
     allRecipes: Record<string, Recipe>;
-    onCraft: (recipe: Recipe) => void;
+    onCraft: (recipeId: string) => void;
     onClose: () => void;
 }
 
@@ -16,7 +17,7 @@ export const CraftingModal: React.FC<CraftingModalProps> = ({ character, allReci
     const canCraft = (recipe: Recipe) => {
         if (character.godMode) return true;
         for (const material of recipe.materials) {
-            const hasAmount = character.inventory[material.name] || 0;
+            const hasAmount = character.inventory[material.itemId] || 0;
             if (hasAmount < material.quantity) {
                 return false;
             }
@@ -45,6 +46,7 @@ export const CraftingModal: React.FC<CraftingModalProps> = ({ character, allReci
                 <main className="flex-grow overflow-y-auto p-4 space-y-4">
                     {knownRecipes.length > 0 ? knownRecipes.map(recipe => {
                         const isCraftable = canCraft(recipe);
+                        const resultItem = ITEM_DEFINITIONS[recipe.result.itemId];
                         return (
                             <div key={recipe.id} className="p-4 bg-black/30 border border-gray-800 rounded-md flex flex-col md:flex-row items-start md:items-center gap-4">
                                 <div className="flex-grow">
@@ -53,11 +55,12 @@ export const CraftingModal: React.FC<CraftingModalProps> = ({ character, allReci
                                     <div className="text-xs">
                                         <span className="font-semibold text-gray-300">Vật liệu: </span>
                                         {recipe.materials.map((mat, index) => {
-                                            const hasAmount = character.inventory[mat.name] || 0;
+                                            const materialItem = ITEM_DEFINITIONS[mat.itemId];
+                                            const hasAmount = character.inventory[mat.itemId] || 0;
                                             const color = hasAmount >= mat.quantity ? 'text-green-400' : 'text-red-400';
                                             return (
-                                                <span key={mat.name} className="mr-2">
-                                                    {mat.name} <span className={color}>({hasAmount}/{mat.quantity})</span>
+                                                <span key={mat.itemId} className="mr-2">
+                                                    {materialItem?.name || mat.itemId} <span className={color}>({hasAmount}/{mat.quantity})</span>
                                                     {index < recipe.materials.length - 1 ? ', ' : ''}
                                                 </span>
                                             );
@@ -65,12 +68,12 @@ export const CraftingModal: React.FC<CraftingModalProps> = ({ character, allReci
                                     </div>
                                     <p className="text-xs mt-1">
                                         <span className="font-semibold text-gray-300">Kết quả: </span>
-                                        {recipe.result.name} x{recipe.result.quantity}
+                                        {resultItem?.name || recipe.result.itemId} x{recipe.result.quantity}
                                     </p>
                                 </div>
                                 <div className="flex-shrink-0 w-full md:w-auto">
                                     <button 
-                                        onClick={() => onCraft(recipe)} 
+                                        onClick={() => onCraft(recipe.id)} 
                                         disabled={!isCraftable}
                                         className="w-full md:w-auto bg-green-800/50 border border-green-700 text-green-300 font-bold py-2 px-6 rounded-sm transition-all duration-200 hover:bg-green-700 hover:text-white disabled:bg-gray-800 disabled:text-gray-500 disabled:border-gray-700 disabled:cursor-not-allowed"
                                     >

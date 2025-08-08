@@ -1,6 +1,5 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
-import { Character, Scene, Enemy, NPC } from '../types';
+import { Character, Scene, Enemy, NPC, Recipe } from '../types';
 import { retrieveRelevantLore } from './ragService';
 import { createPrunedCharacterForAI } from './aiPromptService';
 
@@ -108,20 +107,6 @@ async function callGeminiWithRetry(params: any, isBackstory = false) {
 
 // --- START: SIMPLIFIED SCHEMAS ---
 
-const recipeMaterialSchema = {
-    type: Type.OBJECT,
-    properties: { name: { type: Type.STRING }, quantity: { type: Type.INTEGER } },
-    required: ['name', 'quantity'],
-};
-const recipeSchema = {
-    type: Type.OBJECT,
-    properties: {
-        id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING },
-        materials: { type: Type.ARRAY, items: recipeMaterialSchema },
-        result: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, quantity: { type: Type.INTEGER } }, required: ['name', 'quantity'] },
-    },
-    required: ['id', 'name', 'description', 'materials', 'result']
-};
 const companionStatsSchema = {
     type: Type.OBJECT,
     properties: {
@@ -129,7 +114,6 @@ const companionStatsSchema = {
         speed: { type: Type.INTEGER }, san: { type: Type.INTEGER }, maxSan: { type: Type.INTEGER }, mana: { type: Type.INTEGER },
         maxMana: { type: Type.INTEGER }, stamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, charisma: { type: Type.INTEGER },
     },
-    required: ['hp', 'maxHp', 'attack', 'defense', 'speed', 'san', 'maxSan', 'mana', 'maxMana', 'stamina', 'maxStamina', 'charisma'],
 };
 const companionSchema = {
     type: Type.OBJECT,
@@ -161,7 +145,6 @@ const enemyStatsSchema = {
         hp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, attack: { type: Type.INTEGER },
         defense: { type: Type.INTEGER }, speed: { type: Type.INTEGER },
     },
-    required: ['hp', 'maxHp', 'attack', 'defense', 'speed']
 };
 const bodyPartsSchema = {
     type: Type.OBJECT,
@@ -169,7 +152,6 @@ const bodyPartsSchema = {
         head: { type: Type.STRING }, torso: { type: Type.STRING }, leftArm: { type: Type.STRING },
         rightArm: { type: Type.STRING }, leftLeg: { type: Type.STRING }, rightLeg: { type: Type.STRING },
     },
-    required: ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']
 };
 const enemySchema = {
     type: Type.OBJECT,
@@ -189,35 +171,17 @@ const npcSchema = {
     },
     required: ['id', 'name', 'description', 'disposition']
 };
-const skillSchema = {
-    type: Type.OBJECT,
-    properties: {
-        id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING },
-        costType: { type: Type.STRING }, costAmount: { type: Type.INTEGER }, cooldown: { type: Type.INTEGER },
-        currentCooldown: { type: Type.INTEGER }, school: { type: Type.STRING },
-    },
-    required: ['id', 'name', 'description', 'costType', 'costAmount', 'cooldown', 'currentCooldown']
-};
-const proficiencySchema = {
-    type: Type.OBJECT,
-    properties: {
-        unlocked: { type: Type.BOOLEAN }, level: { type: Type.INTEGER }, xp: { type: Type.INTEGER },
-        xpToNextLevel: { type: Type.INTEGER },
-    },
-    required: ['unlocked', 'level', 'xp', 'xpToNextLevel']
-};
+
 const faithStatusSchema = {
     type: Type.OBJECT,
     properties: {
         markLevel: { type: Type.INTEGER }, faithPoints: { type: Type.INTEGER },
         faithPointsToNextLevel: { type: Type.INTEGER },
     },
-    required: ['markLevel', 'faithPoints', 'faithPointsToNextLevel']
 };
 const followerSchema = {
     type: Type.OBJECT,
     properties: { name: { type: Type.STRING }, loyalty: { type: Type.INTEGER }, status: { type: Type.STRING } },
-    required: ['name', 'loyalty', 'status']
 };
 const sanctuarySchema = {
     type: Type.OBJECT,
@@ -226,32 +190,16 @@ const sanctuarySchema = {
         improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
         followers: { type: Type.ARRAY, items: followerSchema },
     },
-    required: ['name', 'hope', 'population', 'improvements', 'followers']
 };
 const hitChanceSchema = {
     type: Type.OBJECT,
     properties: { choice: { type: Type.STRING }, chance: { type: Type.INTEGER } },
     required: ['choice', 'chance'],
 };
-const weaponProficiencyUpdateSchema = {
-    type: Type.OBJECT,
-    properties: { name: { type: Type.STRING }, proficiency: proficiencySchema },
-    required: ['name', 'proficiency'],
-};
-const magicMasteryUpdateSchema = {
-    type: Type.OBJECT,
-    properties: { name: { type: Type.STRING }, proficiency: proficiencySchema },
-    required: ['name', 'proficiency'],
-};
 const faithUpdateSchema = {
     type: Type.OBJECT,
     properties: { name: { type: Type.STRING }, status: faithStatusSchema },
     required: ['name', 'status'],
-};
-const journalEntrySchema = {
-    type: Type.OBJECT,
-    properties: { title: { type: Type.STRING }, content: { type: Type.STRING } },
-    required: ['title', 'content']
 };
 const inventoryChangeSchema = {
     type: Type.OBJECT,
@@ -275,15 +223,19 @@ const bodyPartChangeSchema = {
     properties: { part: { type: Type.STRING }, status: { type: Type.STRING } },
     required: ['part', 'status'],
 };
-const specialSkillUpdateSchema = {
-    type: Type.OBJECT,
-    properties: { name: { type: Type.STRING }, proficiency: proficiencySchema },
-    required: ['name', 'proficiency'],
-};
 const journalUpdateSchema = {
     type: Type.OBJECT,
     properties: { category: { type: Type.STRING }, title: { type: Type.STRING }, content: { type: Type.STRING } },
     required: ['category', 'title', 'content'],
+};
+const xpAwardSchema = {
+    type: Type.OBJECT,
+    properties: {
+        type: { type: Type.STRING },
+        name: { type: Type.STRING },
+        amount: { type: Type.INTEGER },
+    },
+    required: ['type', 'name', 'amount'],
 };
 
 
@@ -301,16 +253,9 @@ const sceneSchema = {
     gameOver: { type: Type.BOOLEAN },
     reason: { type: Type.STRING },
     endingKey: { type: Type.STRING },
-    updatedSkills: { type: Type.ARRAY, items: skillSchema },
-    newlyLearnedRecipes: { type: Type.ARRAY, items: recipeSchema },
-    updatedWeaponProficiencies: { type: Type.ARRAY, items: weaponProficiencyUpdateSchema },
-    updatedMagicMasteries: { type: Type.ARRAY, items: magicMasteryUpdateSchema },
-    updatedSpecialSkills: { type: Type.ARRAY, items: specialSkillUpdateSchema },
-    specialSkillLearnedNotification: { type: Type.STRING },
-    xpGains: { type: Type.ARRAY, items: { type: Type.STRING } },
-    levelupNotification: { type: Type.STRING },
-    skillLearnedNotification: { type: Type.STRING },
-    recipeLearnedNotification: { type: Type.STRING },
+    newlyLearnedSkillIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+    newlyLearnedRecipeIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+    xpAwards: { type: Type.ARRAY, items: xpAwardSchema },
     updatedFaith: { type: Type.ARRAY, items: faithUpdateSchema },
     updatedSanctuary: { ...sanctuarySchema },
     faithNotification: { type: Type.STRING },
@@ -337,63 +282,44 @@ const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master
 5.  **SINH TỒN & QUAN SÁT:** Quản lý cơn đói và khát của người chơi. Nếu người chơi chọn 'Quan sát' hoặc hành động tương tự, hãy thưởng cho họ bằng cách mô tả một chi tiết ẩn, một vật phẩm bị che giấu hoặc một manh mối trong \`description\`. Phần thưởng vật phẩm thực tế phải được thêm vào \`inventoryChanges\`.
 6.  **KHÔNG CHIẾN ĐẤU:** Bạn KHÔNG xử lý logic chiến đấu theo lượt. AI khác sẽ làm việc đó.
 7.  **NỘI DUNG & CHẾ ĐỘ:** Tôn trọng cờ 'enableGore' và 'godMode'. Xử lý hội thoại NPC một cách tự nhiên.
-8.  **PHẦN THƯỞNG KHÁM PHÁ:** Khi người chơi thành công vượt qua thử thách, thưởng cho họ vật phẩm có giá trị như "Sách Phép", "Cổ Thư", "Sách Hướng Dẫn Thuần Hóa", hoặc "Sách Nghi Lễ Cấm" qua \`inventoryChanges\`.
-9.  **SỬ DỤNG TRI THỨC (QUAN TRỌNG NHẤT):** Nếu có phần 'THÔNG TIN TỪ THƯ VIỆN TRI THỨC', bạn BẮT BUỘC phải dùng những chi tiết đó để làm cho lời kể của bạn trở nên sống động, nhất quán và có chiều sâu. Đây là nguồn kiến thức cốt lõi về thế giới, giúp bạn "nhớ" lại những sự kiện hoặc chi tiết liên quan. Hãy tích hợp nó một cách tự nhiên vào phần mô tả của bạn.
-10. **KẾT THÚC ĐẶC BIỆT:** Đối với các kết thúc mang tính tường thuật (không phải chết do hết HP/SAN), hãy đặt \`gameOver: true\`, cung cấp một \`reason\` mô tả chi tiết, và đặt \`endingKey\` thành một mã định danh duy nhất (ví dụ: 'ESCAPE_ALONE', 'PUPPET_FATE').
-11. **QUẢN LÝ NPC:**
+8.  **SỬ DỤNG TRI THỨC (QUAN TRỌNG NHẤT):** Nếu có phần 'THÔNG TIN TỪ THƯ VIỆN TRI THỨC', bạn BẮT BUỘC phải dùng những chi tiết đó để làm cho lời kể của bạn trở nên sống động, nhất quán và có chiều sâu. Đây là nguồn kiến thức cốt lõi về thế giới, giúp bạn "nhớ" lại những sự kiện hoặc chi tiết liên quan. Hãy tích hợp nó một cách tự nhiên vào phần mô tả của bạn.
+9.  **KẾT THÚC ĐẶC BIỆT:** Đối với các kết thúc mang tính tường thuật (không phải chết do hết HP/SAN), hãy đặt \`gameOver: true\`, cung cấp một \`reason\` mô tả chi tiết, và đặt \`endingKey\` thành một mã định danh duy nhất (ví dụ: 'ESCAPE_ALONE', 'PUPPET_FATE').
+10. **QUẢN LÝ NPC:**
     *   **Tính liên tục (QUAN TRỌNG NHẤT):** Nếu một NPC đã có mặt trong prompt (\`currentNpcs\`) và người chơi không làm gì để họ rời đi, bạn **BẮT BUỘC** phải đưa họ trở lại vào mảng \`npcs\` trong phản hồi. Điều này là tối quan trọng để NPC không "biến mất". Bạn có thể cập nhật thái độ (\`disposition\`) của họ dựa trên hành động của người chơi.
     *   **Giới thiệu:** Bạn có thể giới thiệu NPC mới vào cảnh bằng cách điền thông tin vào mảng \`npcs\`. Mỗi NPC cần có id, tên, mô tả và thái độ ban đầu.
     *   **Tương tác:** Khi người chơi nói chuyện với NPC, hãy cập nhật \`description\` với đoạn hội thoại. Cung cấp các lựa chọn liên quan đến NPC như "Nói chuyện với [Tên NPC]", "Hỏi về [chủ đề]", "Tấn công [Tên NPC]".
     *   **Chiêu mộ:** Trong những trường hợp hiếm hoi và hợp lý (thái độ 'Thân thiện', thuyết phục thành công), bạn có thể cho phép người chơi chiêu mộ một NPC. Khi đó, hãy xóa họ khỏi mảng \`npcs\` và thêm họ vào mảng \`updatedCompanions\`, chuyển đổi họ thành một đối tượng đồng hành.
 
-**LUẬT THEO ĐỘ KHÓ:** Bạn BẮT BUỘC phải điều chỉnh phản hồi theo độ khó được cung cấp. Ở độ khó cao hơn, tài nguyên khan hiếm hơn, kẻ thù nguy hiểm hơn, và NPC ít hợp tác hơn.
-
-**KỸ NĂNG & PHÉP THUẬT:**
-*   **HỌC QUA SÁCH:** Khi người chơi "Đọc [Tên Sách Phép]", bạn BẮT BUỘC phải:
-    1.  Thêm kỹ năng/phép thuật tương ứng vào mảng \`updatedSkills\`. Mảng này chỉ nên chứa **DUY NHẤT** kỹ năng mới này. Bạn phải tự định nghĩa toàn bộ đối tượng Skill.
-    2.  Tạo một \`skillLearnedNotification\` rõ ràng.
-    3.  Xóa sách đó khỏi túi đồ của người chơi bằng \`inventoryChanges\` với số lượng -1.
-
-**KỸ NĂNG ĐẶC BIỆT (THUẦN THÚ & TỬ LINH):**
-*   **MỞ KHÓA:**
-    *   Khi người chơi đọc sách chuyên môn, hãy mở khóa kỹ năng tương ứng trong \`updatedSpecialSkills\` (\`unlocked: true\`, \`level: 1\`).
-    *   Thông báo cho người chơi bằng \`specialSkillLearnedNotification\`.
-    *   Thêm một kỹ năng cơ bản đầu tiên vào \`updatedSkills\` (ví dụ: "Thử Thuần Hóa").
-    *   Xóa sách khỏi túi đồ.
-*   **TĂNG KINH NGHIỆM (XP):** Tăng XP trong \`updatedSpecialSkills\` khi người chơi sử dụng kỹ năng đó.
-*   **LÊN CẤP:** Khi \`xp\` đạt \`xpToNextLevel\`, tăng \`level\`, reset \`xp\`, và thưởng cho người chơi.
-*   **Xử lý Thuần Hóa/Gọi Hồn:** Chỉ xử lý các nỗ lực bên ngoài chiến đấu. Xác định kết quả trong \`tamingResult\` hoặc \`reanimationResult\`.
+**PHẦN THƯỞNG & HỌC HỎI (QUAN TRỌNG):**
+*   **TRAO ĐIỂM KINH NGHIỆM (XP):** Khi người chơi vượt qua thử thách (giải đố, tương tác thông minh), hãy thưởng cho họ một lượng nhỏ XP. Sử dụng mảng \`xpAwards\`. Ví dụ: \`"xpAwards": [{"type": "magic", "name": "Huyền Bí", "amount": 15}]\`.
+*   **HỌC KỸ NĂNG/CÔNG THỨC MỚI:** Khi người chơi tìm thấy và "đọc" một vật phẩm có thể dạy họ điều gì đó (ví dụ: "Sách Phép: Tia Lửa", "Bản Vẽ Bẫy Gấu"), bạn BẮT BUỘC phải:
+    1.  Xóa vật phẩm đó khỏi túi đồ qua \`inventoryChanges\` (số lượng -1).
+    2.  Nếu nó dạy kỹ năng, thêm **ID của kỹ năng** vào mảng \`newlyLearnedSkillIds\`. Ví dụ: \`"newlyLearnedSkillIds": ["fire_bolt"]\`. **KHÔNG** thêm toàn bộ đối tượng kỹ năng.
+    3.  Nếu nó dạy công thức, thêm **ID của công thức** vào mảng \`newlyLearnedRecipeIds\`. Ví dụ: \`"newlyLearnedRecipeIds": ["bandages"]\`.
+    4.  Mô tả sự kiện học hỏi trong trường \`description\` chính.
 
 **NGOẠI THẦN & TÍN NGƯỠNG:**
-*   **Thực thể:** Khaos (hỗn loạn), Aethel (bí ẩn), Lithos (bất biến).
-*   **TÁC ĐỘNG TINH THẦN:** Tiếp xúc với Ngoại Thần gây sát thương Tinh thần ('san' trong \`statChanges\`).
-*   **THĂNG CẤP ẤN KÝ:** Khi \`markLevel\` tăng, đặt \`markLevelUpEvent\`. KHÔNG cung cấp \`choices\`. Ở lượt tiếp theo, người chơi sẽ chọn Con Đường. Dựa vào lựa chọn đó, hãy ban cho họ Sức Mạnh (\`statChanges\`), Quyền Năng (\`updatedSkills\`), hoặc Ảnh Hưởng (\`updatedSanctuary\`).
-*   **QUẢN LÝ THÁNH ĐỊA:** Xử lý các lệnh quản lý Thánh Địa bằng cách cập nhật \`updatedSanctuary\`.
-*   **CẬP NHẬT TÍN NGƯỠNG:** Sử dụng \`updatedFaith\` và \`faithNotification\` để thông báo thay đổi.`;
+*   **THĂNG CẤP ẤN KÝ:** Khi \`markLevel\` của người chơi tăng lên, bạn BẮT BUỘC phải đặt đối tượng \`markLevelUpEvent\` trong phản hồi. **KHÔNG** cung cấp bất kỳ lựa chọn nào trong \`choices\`. Hệ thống của trò chơi sẽ xử lý phần thưởng.
+*   **CẬP NHẬT TÍN NGƯỠNG & THÁNH ĐỊA:** Sử dụng \`updatedFaith\`, \`updatedSanctuary\`, và \`faithNotification\` / \`sanctuaryNotification\` để thông báo các thay đổi. Hệ thống của trò chơi sẽ xử lý các hành động quản lý cụ thể.`;
 
 
-const COMBAT_SYSTEM_INSTRUCTION = `Bạn là một AI Chiến Thuật Gia, chỉ xử lý một lượt chiến đấu trong một RPG.
-**LUẬT CHUNG:**
-1.  **CHỈ CHIẾN ĐẤU:** Nhiệm vụ của bạn chỉ giới hạn trong các hành động chiến đấu. Bỏ qua mọi NPC, câu chuyện, hoặc yếu tố khám phá có thể xuất hiện trong prompt. Chỉ tập trung vào người chơi, đồng hành và kẻ thù.
-2.  **JSON:** Luôn tuân thủ schema JSON. **TUYỆT ĐỐI KHÔNG BAO GIỜ bỏ qua các trường 'required' trong schema.**
-3.  **LỰA CHỌN LÀ TỐI QUAN TRỌNG:** Sau khi xử lý hành động, mảng \`choices\` BẮT BUỘC phải chứa các hành động chiến đấu phù hợp cho lượt tiếp theo (ví dụ: "Tấn công lần nữa", "Phòng thủ", "Đánh giá kẻ thù"). **KHÔNG BAO GIỜ** trả về một mảng \`choices\` rỗng trừ khi trận chiến kết thúc (mảng \`enemies\` rỗng hoặc \`gameOver\` là true).
-4.  **NHIỆM VỤ:** Nhận trạng thái người chơi, kẻ thù và hành động của người chơi. Trả về kết quả chính xác của lượt đó. Khi kẻ thù bị đánh bại, trao vật phẩm qua \`inventoryChanges\` và kinh nghiệm qua \`xpGains\`.
-5.  **CƠ BẢN:** Áp dụng nghiêm ngặt các quy tắc: nhắm mục tiêu bộ phận, hành động báo trước của kẻ thù, tỷ lệ trúng, hiệu ứng trạng thái.
-6.  **TÍNH TOÁN:** Tính toán chính xác sát thương, thay đổi máu, cập nhật trạng thái bộ phận và hiệu ứng.
-
-**LUẬT SỬ DỤNG KỸ NĂNG CỦA NGƯỜI CHƠI:**
-Khi hành động của người chơi là "Sử dụng kỹ năng: [Tên Kỹ Năng]":
-1.  **Xác định Kỹ năng:** Tìm kỹ năng tương ứng trong mảng \`character.skills\`.
-2.  **Áp dụng Hiệu ứng:** Đọc mô tả của kỹ năng và áp dụng chính xác hiệu ứng của nó. 
-3.  **Trừ Chi phí:** Trừ chi phí tài nguyên (\`costType\`, \`costAmount\`) từ người chơi thông qua \`statChanges\`.
-4.  **Đặt Hồi chiêu:** Trong mảng \`updatedSkills\`, trả về **CHỈ DUY NHẤT** đối tượng kỹ năng đã được sử dụng, đặt \`currentCooldown\` bằng \`cooldown\` gốc.
-5.  **Mô tả:** Mô tả rõ ràng hành động sử dụng kỹ năng và kết quả trong trường \`description\` chính.
-
+const COMBAT_SYSTEM_INSTRUCTION = `Bạn là một AI Chiến Thuật Gia, chỉ xử lý một lượt chiến đấu trong một RPG. Vai trò của bạn là điều khiển kẻ thù và đồng hành, đồng thời tường thuật lại diễn biến một cách hấp dẫn.
+**LUẬT CỐT LÕI:**
+1.  **JSON:** Luôn tuân thủ schema JSON. **TUYỆT ĐỐI KHÔNG BAO GIỜ bỏ qua các trường 'required'.**
+2.  **VAI TRÒ CỦA BẠN:**
+    *   **ĐIỀU KHIỂN KẺ THÙ:** Dựa vào hành động của người chơi (đã được xử lý và mô tả trong prompt), hãy quyết định hành động của tất cả kẻ thù.
+    *   **ĐIỀU KHIỂN ĐỒNG HÀNH:** Quyết định hành động cho tất cả đồng hành/đệ tử.
+    *   **TƯỜNG THUẬT:** Mô tả tất cả các hành động (của kẻ thù, đồng hành) trong trường \`description\` một cách sống động.
+3.  **HÀNH ĐỘNG CỦA NGƯỜI CHƠI (QUAN TRỌNG):** Hành động của người chơi và kết quả của nó (sát thương, hiệu ứng) đã được hệ thống xử lý và cung cấp cho bạn trong prompt. **NHIỆM VỤ CỦA BẠN KHÔNG PHẢI LÀ TÍNH TOÁN LẠI NÓ.** Bạn chỉ cần dựa vào đó để tường thuật và quyết định hành động của phe kia.
+4.  **LỰA CHỌN:** Mảng \`choices\` BẮT BUỘC phải chứa các hành động chiến đấu phù hợp cho lượt tiếp theo (ví dụ: "Tấn công lần nữa", "Phòng thủ", "Đánh giá kẻ thù"). **KHÔNG BAO GIỜ** trả về mảng rỗng trừ khi trận chiến kết thúc.
+5.  **TRAO THƯỞNG KHI THẮNG:** Khi kẻ thù cuối cùng bị đánh bại (HP <= 0), hãy xóa nó khỏi mảng \`enemies\`. Sau đó, BẮT BUỘC phải trao phần thưởng:
+    *   **Vật phẩm:** Thêm vật phẩm rơi ra từ kẻ thù vào \`inventoryChanges\`.
+    *   **Kinh nghiệm:** Thêm điểm kinh nghiệm vào \`xpAwards\`. Ví dụ: \`"xpAwards": [{"type": "weapon", "name": "Kiếm và Khiên", "amount": 50}]\`.
+    
 **LUẬT CHIẾN ĐẤU CỦA ĐỒNG HÀNH & ĐỆ TỬ:**
-1.  **Hành động:** Mỗi đồng hành/đệ tử trong \`character.companions\` hành động TỰ ĐỘNG một lần mỗi lượt. Bạn quyết định hành động của chúng dựa trên bản chất và tình hình. Mô tả hành động của chúng trong \`companionActionDescriptions\`.
+1.  **Hành động:** Mỗi đồng hành/đệ tử trong \`character.companions\` hành động TỰ ĐỘNG một lần mỗi lượt. Bạn quyết định hành động của chúng (tấn công, phòng thủ, sử dụng kỹ năng nếu có) dựa trên bản chất của chúng (hung hăng, bảo vệ, v.v.) và tình hình chiến trận.
 2.  **Cập nhật:** Cập nhật trạng thái của chúng (HP, hiệu ứng, v.v.) và trả về toàn bộ danh sách đã cập nhật trong \`updatedCompanions\`.
-3.  **Mục tiêu:** Kẻ thù có thể tấn công người chơi hoặc đồng hành. Đệ tử bất tử có xu hướng tấn công mục tiêu gần nhất.
-4.  **Mô tả:** Luôn cung cấp mô tả rõ ràng cho hành động của từng đồng hành. Ví dụ: "Zombie của bạn lao tới và cắn vào chân của Kẻ Lang Thang."`;
+3.  **Mô tả:** Luôn cung cấp mô tả rõ ràng cho hành động của từng đồng hành trong mảng \`companionActionDescriptions\`. Ví dụ: "Zombie của bạn lao tới và cắn vào chân của Kẻ Lang Thang."`;
 
 
 const BACKSTORY_GENERATION_INSTRUCTION = `Tạo một đoạn tiểu sử ngắn (3-5 câu) cho một nhân vật trong một thế giới kỳ ảo hắc ám, tàn bạo.

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Character, Scene, Skill, NPC } from '../types';
+import { Character, Scene, Skill, NPC, SystemAction } from '../types';
 import { LoadingSpinner } from './LoadingSpinner';
 import { StatDisplay } from './StatDisplay';
 import { SidePanelAccordion } from './SidePanelAccordion';
@@ -18,18 +18,20 @@ interface GameScreenProps {
   scene: Scene;
   loading: boolean;
   onChoice: (choice: string) => void;
+  onSystemAction: (action: SystemAction) => void;
   turnCount: number;
   onSave: () => void;
   onExit: () => void;
 }
 
-export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loading, onChoice, turnCount, onSave, onExit }) => {
+export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loading, onChoice, onSystemAction, turnCount, onSave, onExit }) => {
   const [customAction, setCustomAction] = useState('');
   const [isJournalOpen, setIsJournalOpen] = useState(false);
   const [isCraftingOpen, setIsCraftingOpen] = useState(false);
   const [isCharacterDetailsOpen, setIsCharacterDetailsOpen] = useState(false);
   const [markLevelUpEvent, setMarkLevelUpEvent] = useState(scene.markLevelUpEvent || null);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [systemMessage, setSystemMessage] = useState<string | null>(null);
 
   const mainContentRef = useRef<HTMLDivElement>(null);
 
@@ -45,6 +47,13 @@ export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loadin
       mainContentRef.current.parentElement?.scrollTo(0, 0);
     }
   }, [scene.description]);
+  
+  useEffect(() => {
+      if(systemMessage) {
+          const timer = setTimeout(() => setSystemMessage(null), 3000);
+          return () => clearTimeout(timer);
+      }
+  }, [systemMessage]);
 
   const handleCustomActionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,21 +80,26 @@ export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loadin
     }
   };
   
-  const handleCraft = (recipe: typeof RECIPES[string]) => {
+  const handleCraft = (recipeId: string) => {
       setIsCraftingOpen(false);
-      onChoice(`[HÀNH ĐỘNG] Chế tạo ${recipe.name}.`);
+      onSystemAction({ type: 'CRAFT_ITEM', payload: { recipeId } });
   }
 
-  const handleSanctuaryAction = (action: string) => {
+  const handleUseItem = (itemId: string) => {
+      onSystemAction({ type: 'USE_ITEM', payload: { itemId } });
+  }
+
+  const handleSystemActionWrapper = (action: SystemAction) => {
     setIsCharacterDetailsOpen(false);
-    onChoice(action);
-  }
+    setIsCraftingOpen(false);
+    onSystemAction(action);
+  };
 
-  const handlePathSelection = (path: string) => {
-      if (markLevelUpEvent) {
-          onChoice(`[LÊN CẤP ẤN KÝ] Tôi chọn Con Đường ${path} cho ${markLevelUpEvent.deity}.`);
-          setMarkLevelUpEvent(null);
-      }
+  const handlePathSelection = (action: SystemAction) => {
+    if (markLevelUpEvent) {
+      onSystemAction(action);
+      setMarkLevelUpEvent(null);
+    }
   };
   
   const handleManualSave = () => {
@@ -144,8 +158,8 @@ export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loadin
       <SanityEffects />
       {isJournalOpen && <Journal journal={character.journal} onClose={() => setIsJournalOpen(false)} />}
       {isCraftingOpen && <CraftingModal character={character} allRecipes={RECIPES} onCraft={handleCraft} onClose={() => setIsCraftingOpen(false)} />}
-      {isCharacterDetailsOpen && <CharacterDetailsModal character={character} onSanctuaryAction={handleSanctuaryAction} onClose={() => setIsCharacterDetailsOpen(false)} />}
-      {markLevelUpEvent && <MarkLevelUpModal event={markLevelUpEvent} onSelectPath={handlePathSelection} />}
+      {isCharacterDetailsOpen && <CharacterDetailsModal character={character} onSystemAction={handleSystemActionWrapper} onUseItem={handleUseItem} onClose={() => setIsCharacterDetailsOpen(false)} />}
+      {markLevelUpEvent && <MarkLevelUpModal event={markLevelUpEvent} onSystemAction={handlePathSelection} />}
 
       <div className={`w-full max-w-7xl mx-auto flex flex-col md:flex-row gap-8 p-4 sm:p-6 bg-black/60 border border-gray-800 shadow-lg shadow-red-900/20 rounded-lg backdrop-blur-sm relative overflow-hidden ${sanityPercentage < 40 ? 'sanity-shake' : ''}`} style={screenEffectStyle}>
         {/* Left Side Panel */}

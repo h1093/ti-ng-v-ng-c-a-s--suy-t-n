@@ -1,18 +1,18 @@
-
 import React, { useState } from 'react';
 import { InventoryDisplay } from './InventoryDisplay';
 import { ProficiencyDisplay } from './ProficiencyDisplay';
 import { FaithAndSanctuaryDisplay } from './FaithAndSanctuaryDisplay';
 import { SanctuaryDisplay } from './SanctuaryDisplay';
-import { Character } from '../types';
+import { Character, SystemAction } from '../types';
 
 interface CharacterDetailsModalProps {
     character: Character;
     onClose: () => void;
-    onSanctuaryAction: (action: string) => void;
+    onSystemAction: (action: SystemAction) => void;
+    onUseItem: (itemId: string) => void;
 }
 
-export const CharacterDetailsModal: React.FC<CharacterDetailsModalProps> = ({ character, onClose, onSanctuaryAction }) => {
+export const CharacterDetailsModal: React.FC<CharacterDetailsModalProps> = ({ character, onClose, onSystemAction, onUseItem }) => {
     
     const TABS = [
         { key: 'inventory', label: 'Túi Đồ', show: true },
@@ -26,13 +26,13 @@ export const CharacterDetailsModal: React.FC<CharacterDetailsModalProps> = ({ ch
     const renderContent = () => {
         switch (activeTab) {
             case 'inventory':
-                return <InventoryDisplay inventory={character.inventory} />;
+                return <InventoryDisplay inventory={character.inventory} onUseItem={onUseItem} />;
             case 'proficiency':
                 return <ProficiencyDisplay character={character} />;
             case 'faith':
                 return <FaithAndSanctuaryDisplay character={character} />;
             case 'sanctuary':
-                 return character.sanctuary ? <SanctuaryDisplay sanctuary={character.sanctuary} onAction={onSanctuaryAction} /> : null;
+                 return character.sanctuary ? <SanctuaryDisplay sanctuary={character.sanctuary} onSystemAction={onSystemAction} /> : null;
             default:
                 return null;
         }
