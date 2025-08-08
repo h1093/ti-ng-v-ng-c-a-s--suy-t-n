@@ -34,12 +34,12 @@ export const StartScreen: React.FC<StartScreenProps> = ({ onStart, hasSave, onCo
                 </button>
             </div>
             <div className="mt-8 pt-6 border-t border-gray-800 w-full max-w-lg text-left">
-                <h2 className="text-xl font-bold text-yellow-400 mb-3 text-center">Nhật Ký Cập Nhật: Tiếng Vọng Từ Hư Không</h2>
+                <h2 className="text-xl font-bold text-yellow-400 mb-3 text-center">Nhật Ký Cập Nhật: Giọng Nói Từ Đống Đổ Nát</h2>
                 <ul className="text-sm text-gray-400 list-disc list-inside space-y-2 bg-black/20 p-4 rounded-md border border-gray-700/50">
+                    <li><span className="font-semibold text-gray-300">Thế Giới Sống Động Hơn:</span> Phế tích không còn trống rỗng. Bạn có thể gặp gỡ (hoặc đối đầu) với những kẻ sống sót khác, mỗi người có mục đích và câu chuyện riêng.</li>
                     <li><span className="font-semibold text-gray-300">Số Phận Nghiệt Ngã Hơn Cái Chết:</span> Một "bad ending" mới đã được thêm vào. Không phải mọi kết thúc đều là sự giải thoát.</li>
                     <li><span className="font-semibold text-gray-300">Hệ Thống Kỹ Năng Tiến Triển:</span> Các kỹ năng đặc biệt như Tử Linh Sư và Thuần Thú Sư giờ đây có thể được rèn luyện và lên cấp!</li>
-                    <li><span className="font-semibold text-gray-300">Quản lý Nguồn AI:</span> Giờ bạn có thể sử dụng API Key của riêng mình. Nhấn nút 'Quản Lý Nguồn AI' bên dưới.</li>
-                    <li><span className="font-semibold text-gray-300">Các Ngoại Thần đã thức tỉnh:</span> Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos).</li>
+                    <li><span className="font-semibold text-gray-300">Cải thiện quản lý NPC:</span> Tăng cường logic để đảm bảo tính nhất quán của các nhân vật, ngăn chặn triệt để lỗi NPC "biến mất" khỏi thế giới.</li>
                 </ul>
             </div>
              <div className="mt-8 pt-4 border-t border-gray-800 w-full max-w-sm flex flex-col items-center justify-center gap-4">

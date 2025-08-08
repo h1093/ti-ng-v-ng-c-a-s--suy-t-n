@@ -1,5 +1,39 @@
 import { Character, Scene, InventoryChange, BodyPart, BodyPartStatus, CharacterStats, Proficiency, FaithStatus, Sanctuary, Journal, Recipe, Skill } from '../types';
 
+const HUNGER_PER_TURN = 2;
+const THIRST_PER_TURN = 3;
+
+export function advanceTurn(character: Character, inCombat: boolean): { updatedCharacter: Character, turnInfo: string } {
+    let updatedCharacter = { ...character };
+    let turnInfo = 'Bắt đầu lượt mới.';
+
+    // Reduce skill cooldowns
+    if (updatedCharacter.skills && updatedCharacter.skills.length > 0) {
+        updatedCharacter.skills = updatedCharacter.skills.map(skill => ({
+            ...skill,
+            currentCooldown: Math.max(0, skill.currentCooldown - 1)
+        }));
+        turnInfo += ' Một vài kỹ năng đã được hồi lại.';
+    }
+
+    // Apply hunger and thirst outside of combat
+    if (!inCombat && !updatedCharacter.godMode) {
+        updatedCharacter.hunger = Math.max(0, updatedCharacter.hunger - HUNGER_PER_TURN);
+        updatedCharacter.thirst = Math.max(0, updatedCharacter.thirst - THIRST_PER_TURN);
+        
+        if (updatedCharacter.hunger === 0) {
+            updatedCharacter.stats.hp = Math.max(1, updatedCharacter.stats.hp - 1); // Don't let hunger kill, just weaken
+            turnInfo += ' Cơn đói đang gặm nhấm bạn từ bên trong.';
+        }
+        if (updatedCharacter.thirst === 0) {
+            updatedCharacter.stats.hp = Math.max(1, updatedCharacter.stats.hp - 2); // Thirst is more dangerous
+            turnInfo += ' Cổ họng bạn khô rát vì thiếu nước.';
+        }
+    }
+    
+    return { updatedCharacter, turnInfo };
+}
+
 function applyStatChanges(currentStats: CharacterStats, statChanges?: Partial<CharacterStats>): CharacterStats {
     if (!statChanges) return currentStats;
     const newStats = { ...currentStats };

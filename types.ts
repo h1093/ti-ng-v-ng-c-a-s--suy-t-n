@@ -185,6 +185,16 @@ export interface Enemy {
     statusEffects: string[];
 }
 
+export type NPCDisposition = 'Thân thiện' | 'Trung lập' | 'Thù địch' | 'Sợ hãi';
+
+export interface NPC {
+    id: string;
+    name: string;
+    description: string;
+    disposition: NPCDisposition;
+    dialogueHistory?: string[];
+}
+
 export interface InventoryChange {
     itemName: string;
     quantity: number;
@@ -215,6 +225,7 @@ export interface Scene {
     choices: string[];
     hitChances?: { choice: string; chance: number }[];
     enemies: Enemy[];
+    npcs?: NPC[];
     statChanges?: Partial<CharacterStats>;
     inventoryChanges?: InventoryChange[];
     bodyPartChanges?: Partial<Record<BodyPart, BodyPartStatus>>;

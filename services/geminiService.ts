@@ -1,6 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { Character, Scene, Enemy } from '../types';
+import { Character, Scene, Enemy, NPC } from '../types';
 import { retrieveRelevantLore } from './ragService';
+import { createPrunedCharacterForAI } from './aiPromptService';
 
 const AI_CONFIG_KEY = 'ai_source_config_v1';
 
@@ -228,6 +229,27 @@ const enemySchema = {
     required: ['id', 'name', 'description', 'stats', 'bodyParts', 'telegraphedAction', 'statusEffects'],
 };
 
+const npcSchema = {
+    type: Type.OBJECT,
+    properties: {
+        id: { type: Type.STRING, description: "ID duy nhất cho NPC." },
+        name: { type: Type.STRING, description: "Tên NPC." },
+        description: { type: Type.STRING, description: "Mô tả ngoại hình, hành vi của NPC." },
+        disposition: {
+            type: Type.STRING,
+            enum: ['Thân thiện', 'Trung lập', 'Thù địch', 'Sợ hãi'],
+            description: "Thái độ của NPC đối với người chơi."
+        },
+        dialogueHistory: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: "Lịch sử hội thoại ngắn gọn để duy trì ngữ cảnh."
+        }
+    },
+    required: ['id', 'name', 'description', 'disposition']
+};
+
+
 const skillSchema = {
     type: Type.OBJECT,
     properties: {
@@ -364,6 +386,11 @@ const sceneSchema = {
         items: enemySchema,
         description: "Bắt buộc. Danh sách kẻ thù (mảng rỗng nếu không có)."
     },
+    npcs: {
+        type: Type.ARRAY,
+        items: npcSchema,
+        description: "Tùy chọn. Danh sách các NPC trong cảnh. Nếu một NPC từ prompt vẫn còn ở đây, hãy bao gồm lại họ, có thể với thái độ đã thay đổi."
+    },
     statChanges: {
         type: Type.OBJECT,
         properties: {
@@ -467,29 +494,31 @@ const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master
 6.  **KHÔNG CHIẾN ĐẤU:** Bạn KHÔNG xử lý logic chiến đấu theo lượt. AI khác sẽ làm việc đó.
 7.  **NỘI DUNG & CHẾ ĐỘ:** Tôn trọng cờ 'enableGore' và 'godMode'. Xử lý hội thoại NPC một cách tự nhiên.
 8.  **PHẦN THƯỞNG KHÁM PHÁ:** Khi người chơi thành công vượt qua thử thách, thưởng cho họ vật phẩm có giá trị như "Sách Phép", "Cổ Thư", "Sách Hướng Dẫn Thuần Hóa", hoặc "Sách Nghi Lễ Cấm" qua \`inventoryChanges\`.
-9.  **SỬ DỤNG TRI THỨC:** Nếu có phần 'THÔNG TIN TỪ THƯ VIỆN TRI THỨC', BẮT BUỘC phải dùng những chi tiết đó để làm cho lời kể của bạn trở nên sống động, nhất quán và có chiều sâu. Đây là nguồn kiến thức cốt lõi về thế giới.
-10. **KẾT THÚC ĐẶC BIỆT:** Đối với các kết thúc mang tính tường thuật (không phải chết do hết HP/SAN), hãy đặt \`gameOver: true\`, cung cấp một \`reason\` mô tả chi tiết, và đặt \`endingKey\` thành một mã định danh duy nhất (ví dụ: 'ESCAPE_ALONE', 'TRANSFORMATION_ASCENSION'). Bạn cũng có thể tạo ra một "bad ending" thực sự, nơi người chơi không chết nhưng phải chịu một số phận tồi tệ hơn. Ví dụ, sử dụng \`endingKey: 'PUPPET_FATE'\` nếu người chơi lạm dụng quá nhiều ma thuật hắc ám, nhìn vào những thứ không nên thấy, hoặc thất bại trong một cuộc kiểm tra Tinh thần quan trọng chống lại một thực thể tâm linh.
+9.  **SỬ DỤNG TRI THỨC (QUAN TRỌNG NHẤT):** Nếu có phần 'THÔNG TIN TỪ THƯ VIỆN TRI THỨC', bạn BẮT BUỘC phải dùng những chi tiết đó để làm cho lời kể của bạn trở nên sống động, nhất quán và có chiều sâu. Đây là nguồn kiến thức cốt lõi về thế giới, giúp bạn "nhớ" lại những sự kiện hoặc chi tiết liên quan. Hãy tích hợp nó một cách tự nhiên vào phần mô tả của bạn.
+10. **KẾT THÚC ĐẶC BIỆT:** Đối với các kết thúc mang tính tường thuật (không phải chết do hết HP/SAN), hãy đặt \`gameOver: true\`, cung cấp một \`reason\` mô tả chi tiết, và đặt \`endingKey\` thành một mã định danh duy nhất (ví dụ: 'ESCAPE_ALONE', 'PUPPET_FATE').
+11. **QUẢN LÝ NPC:**
+    *   **Tính liên tục (QUAN TRỌNG NHẤT):** Nếu một NPC đã có mặt trong prompt (\`currentNpcs\`) và người chơi không làm gì để họ rời đi, bạn **BẮT BUỘC** phải đưa họ trở lại vào mảng \`npcs\` trong phản hồi. Điều này là tối quan trọng để NPC không "biến mất". Bạn có thể cập nhật thái độ (\`disposition\`) của họ dựa trên hành động của người chơi.
+    *   **Giới thiệu:** Bạn có thể giới thiệu NPC mới vào cảnh bằng cách điền thông tin vào mảng \`npcs\`. Mỗi NPC cần có id, tên, mô tả và thái độ ban đầu.
+    *   **Tương tác:** Khi người chơi nói chuyện với NPC, hãy cập nhật \`description\` với đoạn hội thoại. Cung cấp các lựa chọn liên quan đến NPC như "Nói chuyện với [Tên NPC]", "Hỏi về [chủ đề]", "Tấn công [Tên NPC]".
+    *   **Chiêu mộ:** Trong những trường hợp hiếm hoi và hợp lý (thái độ 'Thân thiện', thuyết phục thành công), bạn có thể cho phép người chơi chiêu mộ một NPC. Khi đó, hãy xóa họ khỏi mảng \`npcs\` và thêm họ vào mảng \`updatedCompanions\`, chuyển đổi họ thành một đối tượng đồng hành.
 
 **LUẬT THEO ĐỘ KHÓ:** Bạn BẮT BUỘC phải điều chỉnh phản hồi theo độ khó được cung cấp. Ở độ khó cao hơn, tài nguyên khan hiếm hơn, kẻ thù nguy hiểm hơn, và NPC ít hợp tác hơn.
 
 **KỸ NĂNG & PHÉP THUẬT:**
 *   **HỌC QUA SÁCH:** Khi người chơi "Đọc [Tên Sách Phép]", bạn BẮT BUỘC phải:
-    1.  Thêm kỹ năng/phép thuật tương ứng vào mảng \`updatedSkills\`. Mảng này chỉ nên chứa **DUY NHẤT** kỹ năng mới này. Bạn phải tự định nghĩa toàn bộ đối tượng Skill (id, name, description, cost, v.v.).
-    2.  Tạo một \`skillLearnedNotification\` rõ ràng (ví dụ: "Bạn đã học được phép thuật Tia Năng Lượng.").
-    3.  Xóa sách đó khỏi túi đồ của người chơi bằng cách sử dụng \`inventoryChanges\` với số lượng -1.
+    1.  Thêm kỹ năng/phép thuật tương ứng vào mảng \`updatedSkills\`. Mảng này chỉ nên chứa **DUY NHẤT** kỹ năng mới này. Bạn phải tự định nghĩa toàn bộ đối tượng Skill.
+    2.  Tạo một \`skillLearnedNotification\` rõ ràng.
+    3.  Xóa sách đó khỏi túi đồ của người chơi bằng \`inventoryChanges\` với số lượng -1.
 
 **KỸ NĂNG ĐẶC BIỆT (THUẦN THÚ & TỬ LINH):**
 *   **MỞ KHÓA:**
-    *   Khi người chơi đọc "Sách Hướng Dẫn Thuần Hóa" hoặc "Sách Nghi Lễ Cấm", hãy mở khóa kỹ năng tương ứng.
-    *   Trong \`updatedSpecialSkills\`, hãy đặt đối tượng kỹ năng tương ứng thành \`{ level: 1, xp: 0, xpToNextLevel: 100, unlocked: true }\`.
-    *   Thông báo cho người chơi bằng \`specialSkillLearnedNotification\` (ví dụ: "Bạn đã cảm nhận được mối liên kết đầu tiên với các sinh vật. Kỹ năng Thuần Thú đã được mở khóa.").
-    *   Thêm một kỹ năng *cơ bản* đầu tiên vào \`updatedSkills\` (ví dụ: "Thử Thuần Hóa").
-    *   Xóa sách khỏi túi đồ của người chơi.
-*   **TĂNG KINH NGHIỆM (XP):**
-    *   **Thuần Thú:** Mỗi khi người chơi cố gắng thuần hóa, hãy tăng XP cho kỹ năng Thuần Thú trong \`updatedSpecialSkills\`.
-    *   **Tử Linh:** Mỗi khi người chơi hồi sinh thành công một xác chết, hãy tăng XP cho kỹ năng Tử Linh trong \`updatedSpecialSkills\`.
-*   **LÊN CẤP:** Khi \`xp\` đạt \`xpToNextLevel\`: tăng \`level\`, reset \`xp\`, tăng \`xpToNextLevel\`, và thưởng cho người chơi bằng một lợi ích nội tại mới (\`specialSkillLearnedNotification\`) hoặc một kỹ năng mới (\`updatedSkills\` và \`skillLearnedNotification\`).
-*   **Xử lý Thuần Hóa/Gọi Hồn:** Bạn chỉ xử lý các nỗ lực bên ngoài chiến đấu. Xác định kết quả trong \`tamingResult\` hoặc \`reanimationResult\`.
+    *   Khi người chơi đọc sách chuyên môn, hãy mở khóa kỹ năng tương ứng trong \`updatedSpecialSkills\` (\`unlocked: true\`, \`level: 1\`).
+    *   Thông báo cho người chơi bằng \`specialSkillLearnedNotification\`.
+    *   Thêm một kỹ năng cơ bản đầu tiên vào \`updatedSkills\` (ví dụ: "Thử Thuần Hóa").
+    *   Xóa sách khỏi túi đồ.
+*   **TĂNG KINH NGHIỆM (XP):** Tăng XP trong \`updatedSpecialSkills\` khi người chơi sử dụng kỹ năng đó.
+*   **LÊN CẤP:** Khi \`xp\` đạt \`xpToNextLevel\`, tăng \`level\`, reset \`xp\`, và thưởng cho người chơi.
+*   **Xử lý Thuần Hóa/Gọi Hồn:** Chỉ xử lý các nỗ lực bên ngoài chiến đấu. Xác định kết quả trong \`tamingResult\` hoặc \`reanimationResult\`.
 
 **NGOẠI THẦN & TÍN NGƯỠNG:**
 *   **Thực thể:** Khaos (hỗn loạn), Aethel (bí ẩn), Lithos (bất biến).
@@ -501,18 +530,19 @@ const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master
 
 const COMBAT_SYSTEM_INSTRUCTION = `Bạn là một AI Chiến Thuật Gia, chỉ xử lý một lượt chiến đấu trong một RPG.
 **LUẬT CHUNG:**
-1.  **JSON:** Luôn tuân thủ schema JSON. **TUYỆT ĐỐI KHÔNG BAO GIỜ bỏ qua các trường 'required' trong schema.**
-2.  **LỰA CHỌN LÀ TỐI QUAN TRỌNG:** Sau khi xử lý hành động, mảng \`choices\` BẮT BUỘC phải chứa các hành động chiến đấu phù hợp cho lượt tiếp theo (ví dụ: "Tấn công lần nữa", "Phòng thủ", "Đánh giá kẻ thù"). **KHÔNG BAO GIỜ** trả về một mảng \`choices\` rỗng trừ khi trận chiến kết thúc (mảng \`enemies\` rỗng hoặc \`gameOver\` là true).
-3.  **NHIỆM VỤ:** Nhận trạng thái người chơi, kẻ thù và hành động của người chơi. Trả về kết quả chính xác của lượt đó. Khi kẻ thù bị đánh bại, trao vật phẩm qua \`inventoryChanges\` và kinh nghiệm qua \`xpGains\`.
-4.  **CƠ BẢN:** Áp dụng nghiêm ngặt các quy tắc: nhắm mục tiêu bộ phận, hành động báo trước của kẻ thù, tỷ lệ trúng, hiệu ứng trạng thái.
-5.  **TÍNH TOÁN:** Tính toán chính xác sát thương, thay đổi máu, cập nhật trạng thái bộ phận và hiệu ứng.
+1.  **CHỈ CHIẾN ĐẤU:** Nhiệm vụ của bạn chỉ giới hạn trong các hành động chiến đấu. Bỏ qua mọi NPC, câu chuyện, hoặc yếu tố khám phá có thể xuất hiện trong prompt. Chỉ tập trung vào người chơi, đồng hành và kẻ thù.
+2.  **JSON:** Luôn tuân thủ schema JSON. **TUYỆT ĐỐI KHÔNG BAO GIỜ bỏ qua các trường 'required' trong schema.**
+3.  **LỰA CHỌN LÀ TỐI QUAN TRỌNG:** Sau khi xử lý hành động, mảng \`choices\` BẮT BUỘC phải chứa các hành động chiến đấu phù hợp cho lượt tiếp theo (ví dụ: "Tấn công lần nữa", "Phòng thủ", "Đánh giá kẻ thù"). **KHÔNG BAO GIỜ** trả về một mảng \`choices\` rỗng trừ khi trận chiến kết thúc (mảng \`enemies\` rỗng hoặc \`gameOver\` là true).
+4.  **NHIỆM VỤ:** Nhận trạng thái người chơi, kẻ thù và hành động của người chơi. Trả về kết quả chính xác của lượt đó. Khi kẻ thù bị đánh bại, trao vật phẩm qua \`inventoryChanges\` và kinh nghiệm qua \`xpGains\`.
+5.  **CƠ BẢN:** Áp dụng nghiêm ngặt các quy tắc: nhắm mục tiêu bộ phận, hành động báo trước của kẻ thù, tỷ lệ trúng, hiệu ứng trạng thái.
+6.  **TÍNH TOÁN:** Tính toán chính xác sát thương, thay đổi máu, cập nhật trạng thái bộ phận và hiệu ứng.
 
 **LUẬT SỬ DỤNG KỸ NĂNG CỦA NGƯỜI CHƠI:**
 Khi hành động của người chơi là "Sử dụng kỹ năng: [Tên Kỹ Năng]":
 1.  **Xác định Kỹ năng:** Tìm kỹ năng tương ứng trong mảng \`character.skills\`.
-2.  **Áp dụng Hiệu ứng:** Đọc mô tả của kỹ năng và áp dụng chính xác hiệu ứng của nó. Điều này có thể bao gồm thay đổi chỉ số người chơi/kẻ thù (\`statChanges\`), thay đổi trạng thái bộ phận (\`bodyPartChanges\`), hoặc thêm hiệu ứng trạng thái cho kẻ thù.
-3.  **Trừ Chi phí:** Trừ chi phí tài nguyên (\`costType\`, \`costAmount\`) từ người chơi thông qua \`statChanges\` (ví dụ: \`stamina: -20\`).
-4.  **Đặt Hồi chiêu:** Trong mảng \`updatedSkills\`, trả về **CHỈ DUY NHẤT** đối tượng kỹ năng đã được sử dụng. Trong đối tượng đó, hãy đặt \`currentCooldown\` của nó bằng với giá trị \`cooldown\` gốc. **KHÔNG** trả về các kỹ năng khác trong mảng này.
+2.  **Áp dụng Hiệu ứng:** Đọc mô tả của kỹ năng và áp dụng chính xác hiệu ứng của nó. 
+3.  **Trừ Chi phí:** Trừ chi phí tài nguyên (\`costType\`, \`costAmount\`) từ người chơi thông qua \`statChanges\`.
+4.  **Đặt Hồi chiêu:** Trong mảng \`updatedSkills\`, trả về **CHỈ DUY NHẤT** đối tượng kỹ năng đã được sử dụng, đặt \`currentCooldown\` bằng \`cooldown\` gốc.
 5.  **Mô tả:** Mô tả rõ ràng hành động sử dụng kỹ năng và kết quả trong trường \`description\` chính.
 
 **LUẬT CHIẾN ĐẤU CỦA ĐỒNG HÀNH & ĐỆ TỬ:**
@@ -535,16 +565,17 @@ export async function generateScene(
   playerAction: string,
   turnInfo: string,
   currentEnemies: Enemy[] | undefined,
+  currentNpcs: NPC[] | undefined,
   enableGore: boolean
 ): Promise<Scene> {
 
-    const systemInstruction = currentEnemies && currentEnemies.length > 0
+    const inCombat = !!currentEnemies && currentEnemies.length > 0;
+    const systemInstruction = inCombat
         ? COMBAT_SYSTEM_INSTRUCTION
         : NARRATOR_SYSTEM_INSTRUCTION;
 
-    // RAG step: Retrieve relevant lore for non-combat scenes
     let ragContext = '';
-    if (!currentEnemies || currentEnemies.length === 0) {
+    if (!inCombat) {
         const loreContext = `${playerAction} ${character.origin.name} ${Object.keys(character.inventory).join(' ')}`;
         const relevantLore = retrieveRelevantLore(loreContext, 3);
         if (relevantLore.length > 0) {
@@ -555,6 +586,8 @@ ${relevantLore.map(e => `- ${e.content}`).join('\n')}
 ---`;
         }
     }
+    
+    const prunedCharacter = createPrunedCharacterForAI(character);
 
     const prompt = `
     ---
@@ -563,12 +596,15 @@ ${relevantLore.map(e => `- ${e.content}`).join('\n')}
     **Chế độ God Mode:** ${character.godMode ? 'BẬT' : 'TẮT'}
     **Nội dung 18+ (Gore):** ${enableGore ? 'BẬT' : 'TẮT'}
     ${ragContext}
-    **TRẠNG THÁI NHÂN VẬT HIỆN TẠI:**
-    ${JSON.stringify(character, null, 2)}
+    **TRẠNG THÁI NHÂN VẬT HIỆN TẠI (ĐÃ RÚT GỌN):**
+    ${JSON.stringify(prunedCharacter, null, 2)}
     ---
     **KẺ THÙ HIỆN TẠI (nếu có):**
-    ${JSON.stringify(currentEnemies, null, 2)}
+    ${JSON.stringify(currentEnemies || [], null, 2)}
     ---
+    ${!inCombat && currentNpcs && currentNpcs.length > 0 ? `**NPC HIỆN TẠI:**
+${JSON.stringify(currentNpcs, null, 2)}
+---` : ''}
     **THÔNG TIN LƯỢT:** ${turnInfo}
     ---
     **HÀNH ĐỘNG CỦA NGƯỜI CHƠI:**

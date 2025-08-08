@@ -41,5 +41,7 @@ function simpleKeywordSearch(text: string, count: number): LoreEntry[] {
  * @returns An array of relevant lore entries.
  */
 export function retrieveRelevantLore(context: string, maxResults: number = 2): LoreEntry[] {
+    // In a real app, this could also search through the character's journal entries.
+    // For now, we'll just search the static lore library.
     return simpleKeywordSearch(context, maxResults);
 }

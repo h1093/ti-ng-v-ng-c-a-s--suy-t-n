@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect } from 'react';
 import { StartScreen } from './components/StartScreen';
 import { CharacterCreationScreen } from './components/CharacterCreationScreen';
@@ -7,11 +6,43 @@ import { GameOverScreen } from './components/GameOverScreen';
 import { LoadingSpinner } from './components/LoadingSpinner';
 import { AiSourceManagerModal } from './components/AiSourceManagerModal';
 import { generateScene } from './services/geminiService';
-import { processScene } from './services/characterStateService';
+import { processScene, advanceTurn } from './services/characterStateService';
 import { getAiConfig, saveAiConfig } from './services/geminiService';
-import { Character, Scene } from './types';
+import { Character, Scene, NPC, Companion } from './types';
 import { ORIGINS, DIFFICULTIES, ALL_WEAPON_PROFICIENCIES, ALL_MAGIC_SCHOOLS, ALL_DEITIES } from './data/characterData';
 import { ENDINGS } from './data/endingData';
+
+/**
+ * Reconciles the list of NPCs to prevent them from disappearing if the AI forgets to include them.
+ * This acts as a client-side safeguard for state consistency.
+ * @param previousNpcs The list of NPCs from the previous scene.
+ * @param newNpcs The list of NPCs returned by the AI for the current scene.
+ * @param recruitedCompanions NPCs who were explicitly recruited and became companions in the current turn.
+ * @returns A reconciled, consistent list of NPCs for the new scene.
+ */
+const reconcileNpcs = (previousNpcs: NPC[], newNpcs: NPC[] | undefined, recruitedCompanions: Companion[] | undefined): NPC[] => {
+    const prev = previousNpcs || [];
+    const next = newNpcs || [];
+    const companions = recruitedCompanions || [];
+
+    if (prev.length === 0) {
+        return next;
+    }
+
+    const reconciledList = [...next];
+    const nextIds = new Set(next.map(n => n.id));
+    const companionNames = new Set(companions.map(c => c.name));
+
+    for (const p of prev) {
+        // If an NPC from the previous scene is NOT in the new scene's NPC list,
+        // AND they were NOT just recruited as a companion, it means the AI "forgot" them.
+        // We add them back to maintain consistency.
+        if (!nextIds.has(p.id) && !companionNames.has(p.name)) {
+            reconciledList.push(p);
+        }
+    }
+    return reconciledList;
+};
 
 
 const App = () => {
@@ -27,10 +58,8 @@ const App = () => {
   const [isAiManagerOpen, setIsAiManagerOpen] = useState(false);
 
   const WORLD_EVENT_TURN_INTERVAL = 5;
-  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v7'; // Updated version key
+  const SAVE_GAME_KEY = 'echoes_of_ruin_save_v8'; // Updated version key
   const SETTINGS_KEY = 'echoes_of_ruin_settings_v1';
-  const HUNGER_PER_TURN = 2;
-  const THIRST_PER_TURN = 3;
 
   const manualSaveGame = useCallback(() => {
     if (character && gameState === 'PLAYING') {
@@ -68,6 +97,7 @@ const App = () => {
     }
   }, []);
 
+  // Autosave effect
   useEffect(() => {
     if (character && gameState === 'PLAYING') {
       try {
@@ -80,7 +110,6 @@ const App = () => {
         setHasSave(true);
       } catch (error) {
         console.error("Failed to save game:", error);
-        // Don't crash the app, but notify user if possible.
       }
     }
   }, [character, turnCount, gameState, currentScene]);
@@ -105,8 +134,14 @@ const App = () => {
     }
   }, []);
 
-  const sceneProcessor = useCallback((scene: Scene, currentCharacter: Character) => {
-      const { updatedCharacter, finalScene } = processScene(scene, currentCharacter);
+  const sceneProcessor = useCallback((scene: Scene, currentCharacter: Character, previousNpcs: NPC[]) => {
+      // Reconcile NPC list before processing the scene state changes
+      const sceneWithReconciledNpcs = {
+          ...scene,
+          npcs: reconcileNpcs(previousNpcs, scene.npcs, scene.updatedCompanions),
+      };
+
+      const { updatedCharacter, finalScene } = processScene(sceneWithReconciledNpcs, currentCharacter);
       
       setCharacter(updatedCharacter);
       setCurrentScene(finalScene);
@@ -138,37 +173,17 @@ const App = () => {
     const newTurnCount = turnCount + 1;
     setTurnCount(newTurnCount);
     
-    let updatedCharacter = { ...character };
-    let turnInfo = 'Bắt đầu lượt mới. ';
-
-    updatedCharacter.skills = updatedCharacter.skills.map(skill => ({
-        ...skill,
-        currentCooldown: Math.max(0, skill.currentCooldown - 1)
-    }));
-    turnInfo += 'Một vài kỹ năng đã được hồi lại. ';
-
     const inCombat = currentScene.enemies && currentScene.enemies.length > 0;
-    if (!inCombat && !updatedCharacter.godMode) {
-        updatedCharacter.hunger = Math.max(0, updatedCharacter.hunger - HUNGER_PER_TURN);
-        updatedCharacter.thirst = Math.max(0, updatedCharacter.thirst - THIRST_PER_TURN);
-    }
-
-    if (updatedCharacter.hunger === 0 && !updatedCharacter.godMode) {
-      updatedCharacter.stats.hp = Math.max(1, updatedCharacter.stats.hp - 1); // Don't let hunger kill, just weaken
-      turnInfo += 'Cơn đói đang gặm nhấm bạn từ bên trong. ';
-    }
-    if (updatedCharacter.thirst === 0 && !updatedCharacter.godMode) {
-      updatedCharacter.stats.hp = Math.max(1, updatedCharacter.stats.hp - 2); // Thirst is more dangerous
-      turnInfo += 'Cổ họng bạn khô rát vì thiếu nước. ';
-    }
+    const { updatedCharacter, turnInfo } = advanceTurn(character, inCombat);
 
     let actionForGemini = choice;
     if (newTurnCount > 0 && newTurnCount % WORLD_EVENT_TURN_INTERVAL === 0 && !inCombat) {
         actionForGemini += "\n\n[CHỈ THỊ QUẢN TRÒ: Đã đến lúc cho một SỰ KIỆN THẾ GIỚI. Hãy đưa một yếu tố bất ngờ, đáng lo ngại hoặc kỳ lạ vào cảnh này.]";
     }
     
-    const scene = await generateScene(updatedCharacter, actionForGemini, turnInfo, currentScene.enemies, enableGore);
-    sceneProcessor(scene, updatedCharacter);
+    const previousNpcs = currentScene.npcs || [];
+    const scene = await generateScene(updatedCharacter, actionForGemini, turnInfo, currentScene.enemies, previousNpcs, enableGore);
+    sceneProcessor(scene, updatedCharacter, previousNpcs);
   }, [character, currentScene, sceneProcessor, turnCount, enableGore]);
 
   const startGame = useCallback(async (newCharacter: Character) => {
@@ -181,8 +196,8 @@ const App = () => {
           ? `[HÀNH TRÌNH TÙY CHỈNH]: ${newCharacter.customScenario}` 
           : "BẮT ĐẦU CUỘC PHIÊU LƯU: Nhân vật đặt những bước chân đầu tiên vào phế tích.";
       
-      const firstScene = await generateScene(newCharacter, firstAction, 'Bắt đầu một hành trình mới.', [], enableGore);
-      sceneProcessor(firstScene, newCharacter);
+      const firstScene = await generateScene(newCharacter, firstAction, 'Bắt đầu một hành trình mới.', [], [], enableGore);
+      sceneProcessor(firstScene, newCharacter, []);
   }, [sceneProcessor, enableGore]);
 
   const handleStartCombatSandbox = useCallback(async () => {
@@ -228,8 +243,8 @@ const App = () => {
     setCharacter(defaultCharacter);
     setTurnCount(0);
     setGameState('PLAYING');
-    const scene = await generateScene(defaultCharacter, "[CHẾ ĐỘ THỬ NGHIỆM CHIẾN ĐẤU]: Bắt đầu một trận chiến ngẫu nhiên chống lại một kẻ thù đầy thách thức.", '', [], enableGore);
-    sceneProcessor(scene, defaultCharacter);
+    const scene = await generateScene(defaultCharacter, "[CHẾ ĐỘ THỬ NGHIỆM CHIẾN ĐẤU]: Bắt đầu một trận chiến ngẫu nhiên chống lại một kẻ thù đầy thách thức.", '', [], [], enableGore);
+    sceneProcessor(scene, defaultCharacter, []);
   }, [sceneProcessor, enableGore]);
 
   const handleCreationFinish = (newCharacter: Character) => {

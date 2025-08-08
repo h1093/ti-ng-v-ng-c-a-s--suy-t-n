@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Character, Scene, Skill } from '../types';
+import { Character, Scene, Skill, NPC } from '../types';
 import { LoadingSpinner } from './LoadingSpinner';
 import { StatDisplay } from './StatDisplay';
 import { SidePanelAccordion } from './SidePanelAccordion';
 import { BodyStatus } from './BodyStatus';
 import { EnemyDisplay } from './EnemyDisplay';
+import { NpcDisplay } from './NpcDisplay';
 import { CompanionDisplay } from './CompanionDisplay';
 import { Journal } from './Journal';
 import { CraftingModal } from './CraftingModal';
@@ -39,8 +40,9 @@ export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loadin
   }, [scene.markLevelUpEvent]);
   
   useEffect(() => {
+    // Scroll to the top of the main content area when the scene description changes
     if (mainContentRef.current) {
-      mainContentRef.current.scrollTop = 0;
+      mainContentRef.current.parentElement?.scrollTo(0, 0);
     }
   }, [scene.description]);
 
@@ -194,7 +196,7 @@ export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loadin
         </aside>
 
         {/* Right Main Content */}
-        <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col max-h-[85vh]">
+        <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col max-h-[85vh] overflow-y-auto pr-2">
           {inCombat && (
             <div className="mb-4 flex-shrink-0">
               <h3 className="text-2xl font-bold text-red-700 border-b-2 border-red-800/50 pb-2 mb-4">KẺ THÙ</h3>
@@ -203,15 +205,25 @@ export const GameScreen: React.FC<GameScreenProps> = ({ character, scene, loadin
               </div>
             </div>
           )}
+          
+          {!inCombat && scene.npcs && scene.npcs.length > 0 && (
+            <div className="mb-4 flex-shrink-0">
+              <h3 className="text-2xl font-bold text-blue-400 border-b-2 border-blue-800/50 pb-2 mb-4">NHÂN VẬT KHÁC</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 max-h-[40vh] overflow-y-auto pr-2">
+                {scene.npcs.map(npc => <NpcDisplay key={npc.id} npc={npc} />)}
+              </div>
+            </div>
+          )}
+
 
           {/* Scrollable container for description and actions */}
-          <div ref={mainContentRef} className="flex flex-col flex-grow overflow-y-auto pr-2">
-              <main className="mb-6">
+          <div ref={mainContentRef} className="flex flex-col flex-grow min-h-0">
+              <main className="mb-6 flex-grow overflow-y-auto">
                 <h3 className="text-2xl font-bold text-gray-400 border-b-2 border-gray-700/50 pb-2 mb-4">DIỄN BIẾN</h3>
                 {loading ? <LoadingSpinner /> : <p className="text-gray-300 text-lg leading-relaxed whitespace-pre-wrap" style={{textShadow: `0 0 calc(var(--sanity-factor) * 5px) rgba(255, 100, 100, 0.5)`}}>{scene.description}</p>}
               </main>
 
-              <footer className="w-full mt-auto">
+              <footer className="w-full mt-auto flex-shrink-0">
                 {!loading && !markLevelUpEvent && (
                   <>
                     {inCombat && character.skills.length > 0 && (

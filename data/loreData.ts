@@ -38,6 +38,22 @@ export const LORE_LIBRARY: LoreEntry[] = [
     keywords: ['trường kiếm nứt', 'trường kiếm', 'sword'],
     content: "Thanh trường kiếm này đã chứng kiến nhiều trận chiến, và những vết nứt trên lưỡi kiếm là minh chứng cho điều đó. Dù không còn ở trạng thái hoàn hảo, nó vẫn là một vũ khí đáng gờm trong tay người có đủ kỹ năng."
   },
+   // Deities
+  {
+    id: 'deity_gro_goroth',
+    keywords: ['gro-goroth', 'hủy diệt', 'tra tấn', 'destruction', 'torture'],
+    content: "Gro-goroth, vị thần của sự hủy diệt và nỗi đau vô tận. Các tín đồ của ông ta tin rằng sự thanh tẩy chỉ đến qua sự đau đớn tột cùng và sự xóa bỏ hoàn toàn. Các nghi lễ của họ thường liên quan đến sự tự hành hạ và hiến tế đẫm máu."
+  },
+  {
+    id: 'deity_sylvian',
+    keywords: ['sylvian', 'tình yêu', 'thụ thai', 'thiên nhiên', 'love', 'nature'],
+    content: "Sylvian, nữ thần của tình yêu, sự sinh sôi và thiên nhiên. Bà là một thế lực của sự sống, nhưng trong một thế giới mục nát, sự sống đó thường mang hình hài quái dị và sai lệch. Các khu vườn của bà ta vừa xinh đẹp lại vừa chết chóc."
+  },
+  {
+    id: 'deity_alll_mer',
+    keywords: ['alll-mer', 'all-mer', 'ánh sáng', 'trật tự', 'light', 'order'],
+    content: "Alll-mer, vị thần đã thăng thiên của loài người, đại diện cho trật tự, ánh sáng và hy vọng. Tuy nhiên, sự vắng mặt của ông đã để lại một khoảng trống, và các tín đồ của ông đang dần trở nên cực đoan và tàn nhẫn trong nỗ lực duy trì di sản của ông."
+  },
   // General Lore
   {
       id: 'location_ruins',
