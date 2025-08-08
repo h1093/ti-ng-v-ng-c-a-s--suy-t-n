@@ -11,13 +11,14 @@ import { processScene } from './services/characterStateService';
 import { getAiConfig, saveAiConfig } from './services/geminiService';
 import { Character, Scene } from './types';
 import { ORIGINS, DIFFICULTIES, ALL_WEAPON_PROFICIENCIES, ALL_MAGIC_SCHOOLS, ALL_DEITIES } from './data/characterData';
+import { ENDINGS } from './data/endingData';
 
 
 const App = () => {
   const [gameState, setGameState] = useState('START_SCREEN');
   const [character, setCharacter] = useState<Character | null>(null);
   const [currentScene, setCurrentScene] = useState<Scene | null>(null);
-  const [gameOverReason, setGameOverReason] = useState('');
+  const [endingDetails, setEndingDetails] = useState<{ typeKey: string; reason: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [turnCount, setTurnCount] = useState(0);
   const [hasSave, setHasSave] = useState(false);
@@ -95,8 +96,8 @@ const App = () => {
     }
   };
 
-  const handleGameOver = useCallback((reason: string, finalCharacterState?: Character) => {
-    setGameOverReason(reason);
+  const handleGameOver = useCallback((typeKey: string, reason: string, finalCharacterState?: Character) => {
+    setEndingDetails({ typeKey, reason });
     setGameState('GAME_OVER');
     if (finalCharacterState?.difficulty?.permadeath) {
       localStorage.removeItem(SAVE_GAME_KEY);
@@ -110,13 +111,24 @@ const App = () => {
       setCharacter(updatedCharacter);
       setCurrentScene(finalScene);
       
-      if (finalScene.gameOver || !updatedCharacter.godMode && (updatedCharacter.stats.hp <= 0 || updatedCharacter.stats.san <= 0)) {
-          let reason = finalScene.reason || '';
-          if (updatedCharacter.stats.hp <= 0 && !reason) reason = "Cơ thể bạn kiệt sức, đổ gục thành một đống máu me trên nền đá lạnh lẽo.";
-          if (updatedCharacter.stats.san <= 0 && !reason) reason = "Tâm trí bạn vỡ vụn, để lại bạn một cái vỏ rỗng tuếch, lạc lối trong những kinh hoàng bạn đã chứng kiến.";
-          handleGameOver(reason, updatedCharacter);
+      const isDead = !updatedCharacter.godMode && (updatedCharacter.stats.hp <= 0 || updatedCharacter.stats.san <= 0);
+
+      if (finalScene.gameOver || isDead) {
+          let typeKey = finalScene.endingKey || '';
+          
+          if (!typeKey) {
+              if (updatedCharacter.stats.hp <= 0) typeKey = 'DEATH_HP';
+              else if (updatedCharacter.stats.san <= 0) typeKey = 'DEATH_SANITY';
+              else typeKey = 'GENERIC_END'; // Fallback for other gameOver cases without a specific key
+          }
+          
+          const defaultEnding = ENDINGS[typeKey];
+          const reason = finalScene.reason || defaultEnding?.defaultReason || "Hành trình của bạn đã kết thúc.";
+
+          handleGameOver(typeKey, reason, updatedCharacter);
+      } else {
+        setLoading(false);
       }
-      setLoading(false);
   }, [handleGameOver]);
 
   const handleChoice = useCallback(async (choice: string) => {
@@ -255,7 +267,7 @@ const App = () => {
   const handleRestart = () => {
     setCharacter(null);
     setCurrentScene(null);
-    setGameOverReason('');
+    setEndingDetails(null);
     setGameState('START_SCREEN');
     setLoading(false);
     setTurnCount(0);
@@ -304,7 +316,13 @@ const App = () => {
           <LoadingSpinner />
         );
       case 'GAME_OVER':
-        return <GameOverScreen reason={gameOverReason} onRestart={handleRestart} />;
+        return endingDetails ? (
+            <GameOverScreen 
+                endingKey={endingDetails.typeKey}
+                reason={endingDetails.reason} 
+                onRestart={handleRestart} 
+            />
+        ) : <LoadingSpinner />;
       default:
         return (
           <StartScreen

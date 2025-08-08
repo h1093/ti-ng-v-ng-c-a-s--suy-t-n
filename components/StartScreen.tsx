@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface StartScreenProps {
@@ -37,6 +36,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({ onStart, hasSave, onCo
             <div className="mt-8 pt-6 border-t border-gray-800 w-full max-w-lg text-left">
                 <h2 className="text-xl font-bold text-yellow-400 mb-3 text-center">Nhật Ký Cập Nhật: Tiếng Vọng Từ Hư Không</h2>
                 <ul className="text-sm text-gray-400 list-disc list-inside space-y-2 bg-black/20 p-4 rounded-md border border-gray-700/50">
+                    <li><span className="font-semibold text-gray-300">Số Phận Nghiệt Ngã Hơn Cái Chết:</span> Một "bad ending" mới đã được thêm vào. Không phải mọi kết thúc đều là sự giải thoát.</li>
                     <li><span className="font-semibold text-gray-300">Hệ Thống Kỹ Năng Tiến Triển:</span> Các kỹ năng đặc biệt như Tử Linh Sư và Thuần Thú Sư giờ đây có thể được rèn luyện và lên cấp!</li>
                     <li><span className="font-semibold text-gray-300">Quản lý Nguồn AI:</span> Giờ bạn có thể sử dụng API Key của riêng mình. Nhấn nút 'Quản Lý Nguồn AI' bên dưới.</li>
                     <li><span className="font-semibold text-gray-300">Các Ngoại Thần đã thức tỉnh:</span> Ba thực thể nguyên thủy mới đã được thêm vào thế giới, mang theo những cơ hội và hiểm nguy khó lường (Khaos, Aethel, Lithos).</li>

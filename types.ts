@@ -64,6 +64,11 @@ export interface Personality {
     effect: string;
 }
 
+export interface Ending {
+    title: string;
+    defaultReason: string;
+}
+
 // From characterStateService / App state
 export interface CharacterStats {
   hp: number;
@@ -215,6 +220,7 @@ export interface Scene {
     bodyPartChanges?: Partial<Record<BodyPart, BodyPartStatus>>;
     gameOver: boolean;
     reason?: string;
+    endingKey?: string;
     updatedSkills?: Skill[];
     newlyLearnedRecipes?: Recipe[];
     updatedWeaponProficiencies?: { name: string; proficiency: Proficiency }[];

@@ -395,6 +395,7 @@ const sceneSchema = {
     },
     gameOver: { type: Type.BOOLEAN, description: "Bắt buộc. true nếu game over." },
     reason: { type: Type.STRING, description: "Tùy chọn. Lý do game over." },
+    endingKey: { type: Type.STRING, description: "Tùy chọn. Key định danh cho một kết thúc cụ thể (ví dụ: ESCAPE_ALONE, PUPPET_FATE). Dùng cho các kết thúc đặc biệt, không phải chết do HP/SAN." },
     updatedSkills: { 
         type: Type.ARRAY, 
         items: skillSchema,
@@ -467,6 +468,7 @@ const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master
 7.  **NỘI DUNG & CHẾ ĐỘ:** Tôn trọng cờ 'enableGore' và 'godMode'. Xử lý hội thoại NPC một cách tự nhiên.
 8.  **PHẦN THƯỞNG KHÁM PHÁ:** Khi người chơi thành công vượt qua thử thách, thưởng cho họ vật phẩm có giá trị như "Sách Phép", "Cổ Thư", "Sách Hướng Dẫn Thuần Hóa", hoặc "Sách Nghi Lễ Cấm" qua \`inventoryChanges\`.
 9.  **SỬ DỤNG TRI THỨC:** Nếu có phần 'THÔNG TIN TỪ THƯ VIỆN TRI THỨC', BẮT BUỘC phải dùng những chi tiết đó để làm cho lời kể của bạn trở nên sống động, nhất quán và có chiều sâu. Đây là nguồn kiến thức cốt lõi về thế giới.
+10. **KẾT THÚC ĐẶC BIỆT:** Đối với các kết thúc mang tính tường thuật (không phải chết do hết HP/SAN), hãy đặt \`gameOver: true\`, cung cấp một \`reason\` mô tả chi tiết, và đặt \`endingKey\` thành một mã định danh duy nhất (ví dụ: 'ESCAPE_ALONE', 'TRANSFORMATION_ASCENSION'). Bạn cũng có thể tạo ra một "bad ending" thực sự, nơi người chơi không chết nhưng phải chịu một số phận tồi tệ hơn. Ví dụ, sử dụng \`endingKey: 'PUPPET_FATE'\` nếu người chơi lạm dụng quá nhiều ma thuật hắc ám, nhìn vào những thứ không nên thấy, hoặc thất bại trong một cuộc kiểm tra Tinh thần quan trọng chống lại một thực thể tâm linh.
 
 **LUẬT THEO ĐỘ KHÓ:** Bạn BẮT BUỘC phải điều chỉnh phản hồi theo độ khó được cung cấp. Ở độ khó cao hơn, tài nguyên khan hiếm hơn, kẻ thù nguy hiểm hơn, và NPC ít hợp tác hơn.
 
