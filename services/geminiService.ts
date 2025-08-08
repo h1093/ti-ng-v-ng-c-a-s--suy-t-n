@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { Character, Scene, Enemy } from '../types';
+import { retrieveRelevantLore } from './ragService';
 
 const AI_CONFIG_KEY = 'ai_source_config_v1';
 
@@ -465,6 +466,7 @@ const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master
 6.  **KHÔNG CHIẾN ĐẤU:** Bạn KHÔNG xử lý logic chiến đấu theo lượt. AI khác sẽ làm việc đó.
 7.  **NỘI DUNG & CHẾ ĐỘ:** Tôn trọng cờ 'enableGore' và 'godMode'. Xử lý hội thoại NPC một cách tự nhiên.
 8.  **PHẦN THƯỞNG KHÁM PHÁ:** Khi người chơi thành công vượt qua thử thách, thưởng cho họ vật phẩm có giá trị như "Sách Phép", "Cổ Thư", "Sách Hướng Dẫn Thuần Hóa", hoặc "Sách Nghi Lễ Cấm" qua \`inventoryChanges\`.
+9.  **SỬ DỤNG TRI THỨC:** Nếu có phần 'THÔNG TIN TỪ THƯ VIỆN TRI THỨC', BẮT BUỘC phải dùng những chi tiết đó để làm cho lời kể của bạn trở nên sống động, nhất quán và có chiều sâu. Đây là nguồn kiến thức cốt lõi về thế giới.
 
 **LUẬT THEO ĐỘ KHÓ:** Bạn BẮT BUỘC phải điều chỉnh phản hồi theo độ khó được cung cấp. Ở độ khó cao hơn, tài nguyên khan hiếm hơn, kẻ thù nguy hiểm hơn, và NPC ít hợp tác hơn.
 
@@ -538,13 +540,27 @@ export async function generateScene(
         ? COMBAT_SYSTEM_INSTRUCTION
         : NARRATOR_SYSTEM_INSTRUCTION;
 
+    // RAG step: Retrieve relevant lore for non-combat scenes
+    let ragContext = '';
+    if (!currentEnemies || currentEnemies.length === 0) {
+        const loreContext = `${playerAction} ${character.origin.name} ${Object.keys(character.inventory).join(' ')}`;
+        const relevantLore = retrieveRelevantLore(loreContext, 3);
+        if (relevantLore.length > 0) {
+            ragContext = `
+---
+**THÔNG TIN TỪ THƯ VIỆN TRI THỨC (Sử dụng để làm giàu câu chuyện):**
+${relevantLore.map(e => `- ${e.content}`).join('\n')}
+---`;
+        }
+    }
+
     const prompt = `
     ---
     **Bối cảnh:** Một thế giới kỳ ảo đen tối, tàn bạo và không khoan nhượng.
     **Độ khó:** ${character.difficulty.name} (${character.difficulty.description})
     **Chế độ God Mode:** ${character.godMode ? 'BẬT' : 'TẮT'}
     **Nội dung 18+ (Gore):** ${enableGore ? 'BẬT' : 'TẮT'}
-    ---
+    ${ragContext}
     **TRẠNG THÁI NHÂN VẬT HIỆN TẠI:**
     ${JSON.stringify(character, null, 2)}
     ---

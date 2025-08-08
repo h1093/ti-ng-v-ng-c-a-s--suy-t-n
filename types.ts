@@ -16,6 +16,13 @@ export interface Recipe {
   };
 }
 
+// From loreData
+export interface LoreEntry {
+  id: string;
+  keywords: string[];
+  content: string;
+}
+
 // From characterData
 export interface Difficulty {
   name: string;
