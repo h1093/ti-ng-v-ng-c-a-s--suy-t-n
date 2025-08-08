@@ -1,4 +1,5 @@
-import { Character, Scene, InventoryChange, BodyPart, BodyPartStatus, CharacterStats, Proficiency, FaithStatus, Sanctuary, Journal, Recipe, Skill } from '../types';
+
+import { Character, Scene, InventoryChange, BodyPart, BodyPartStatus, CharacterStats, Proficiency, FaithStatus, Sanctuary, Journal, Recipe, Skill, StatChange, BodyPartChange, SpecialSkillUpdate, JournalUpdate } from '../types';
 
 const HUNGER_PER_TURN = 2;
 const THIRST_PER_TURN = 3;
@@ -34,13 +35,15 @@ export function advanceTurn(character: Character, inCombat: boolean): { updatedC
     return { updatedCharacter, turnInfo };
 }
 
-function applyStatChanges(currentStats: CharacterStats, statChanges?: Partial<CharacterStats>): CharacterStats {
+function applyStatChanges(currentStats: CharacterStats, statChanges?: StatChange[]): CharacterStats {
     if (!statChanges) return currentStats;
     const newStats = { ...currentStats };
-    for (const [key, value] of Object.entries(statChanges)) {
-        if (value !== undefined) {
-            const statKey = key as keyof CharacterStats;
-            newStats[statKey] = Math.max(0, (newStats[statKey] || 0) + value);
+    const validStats = Object.keys(newStats);
+
+    for (const change of statChanges) {
+        if (validStats.includes(change.stat)) {
+            const statKey = change.stat as keyof CharacterStats;
+            newStats[statKey] = Math.max(0, (newStats[statKey] || 0) + change.change);
         }
     }
     return newStats;
@@ -58,9 +61,18 @@ function applyInventoryChanges(currentInventory: Record<string, number>, invento
     return newInventory;
 }
 
-function applyBodyPartChanges(currentBodyParts: Record<BodyPart, BodyPartStatus>, bodyPartChanges?: Partial<Record<BodyPart, BodyPartStatus>>): Record<BodyPart, BodyPartStatus> {
+function applyBodyPartChanges(currentBodyParts: Record<BodyPart, BodyPartStatus>, bodyPartChanges?: BodyPartChange[]): Record<BodyPart, BodyPartStatus> {
     if (!bodyPartChanges) return currentBodyParts;
-    return { ...currentBodyParts, ...bodyPartChanges };
+    const newBodyParts = { ...currentBodyParts };
+    const validParts = Object.keys(newBodyParts);
+
+    for (const change of bodyPartChanges) {
+        if (validParts.includes(change.part)) {
+             const partKey = change.part as BodyPart;
+             newBodyParts[partKey] = change.status as BodyPartStatus;
+        }
+    }
+    return newBodyParts;
 }
 
 function applyWeaponProficiencyUpdates(currentProficiencies: Record<string, Proficiency>, updates?: { name: string, proficiency: Proficiency }[]): Record<string, Proficiency> {
@@ -83,13 +95,15 @@ function applyMagicMasteryUpdates(currentMasteries: Record<string, Proficiency>,
     return newMasteries;
 }
 
-function applySpecialSkillUpdates(currentSpecialSkills: Character['specialSkills'], updates?: Partial<Character['specialSkills']>): Character['specialSkills'] {
+function applySpecialSkillUpdates(currentSpecialSkills: Character['specialSkills'], updates?: SpecialSkillUpdate[]): Character['specialSkills'] {
     if (!updates) return currentSpecialSkills;
     const newSpecialSkills = { ...currentSpecialSkills };
-    for (const [key, value] of Object.entries(updates)) {
-        const skillKey = key as keyof Character['specialSkills'];
-        if (newSpecialSkills[skillKey] && value) {
-            newSpecialSkills[skillKey] = { ...newSpecialSkills[skillKey], ...value };
+    const validSkills = Object.keys(newSpecialSkills);
+
+    for (const update of updates) {
+        if(validSkills.includes(update.name)) {
+            const skillKey = update.name as keyof Character['specialSkills'];
+            newSpecialSkills[skillKey] = update.proficiency;
         }
     }
     return newSpecialSkills;
@@ -112,22 +126,23 @@ function applySanctuaryUpdate(currentSanctuary: Sanctuary | null, update?: Sanct
     return update;
 }
 
-function applyJournalUpdates(currentJournal: Journal, journalUpdates?: Partial<Journal>): { updatedJournal: Journal, wasUpdated: boolean } {
-    if (!journalUpdates || Object.keys(journalUpdates).length === 0) {
+function applyJournalUpdates(currentJournal: Journal, journalUpdates?: JournalUpdate[]): { updatedJournal: Journal, wasUpdated: boolean } {
+    if (!journalUpdates || journalUpdates.length === 0) {
         return { updatedJournal: currentJournal, wasUpdated: false };
     }
 
     const newJournal = { ...currentJournal };
+    const validCategories = Object.keys(newJournal);
     let wasUpdated = false;
-    for (const key of Object.keys(journalUpdates) as (keyof Journal)[]) {
-        const existingEntries = newJournal[key] || [];
-        const newEntries = journalUpdates[key];
-        if (newEntries && newEntries.length > 0) {
-            const filteredNewEntries = newEntries.filter(
-                (newEntry) => !existingEntries.some((existing) => existing.title === newEntry.title)
-            );
-            if (filteredNewEntries.length > 0) {
-                newJournal[key] = [...existingEntries, ...filteredNewEntries];
+    
+    for (const update of journalUpdates) {
+        if (validCategories.includes(update.category)) {
+            const categoryKey = update.category as keyof Journal;
+            const existingEntries = newJournal[categoryKey];
+            const entryExists = existingEntries.some(e => e.title === update.title);
+            
+            if (!entryExists) {
+                newJournal[categoryKey] = [...existingEntries, { title: update.title, content: update.content }];
                 wasUpdated = true;
             }
         }

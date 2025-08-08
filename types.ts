@@ -220,15 +220,38 @@ export interface MarkLevelUpEvent {
     newLevel: number;
 }
 
+// Simplified Scene types for Gemini schema
+export interface StatChange {
+    stat: string;
+    change: number;
+}
+
+export interface BodyPartChange {
+    part: string;
+    status: string;
+}
+
+export interface SpecialSkillUpdate {
+    name: string;
+    proficiency: Proficiency;
+}
+
+export interface JournalUpdate {
+    category: string;
+    title: string;
+    content: string;
+}
+
+
 export interface Scene {
     description: string;
     choices: string[];
     hitChances?: { choice: string; chance: number }[];
     enemies: Enemy[];
     npcs?: NPC[];
-    statChanges?: Partial<CharacterStats>;
+    statChanges?: StatChange[];
     inventoryChanges?: InventoryChange[];
-    bodyPartChanges?: Partial<Record<BodyPart, BodyPartStatus>>;
+    bodyPartChanges?: BodyPartChange[];
     gameOver: boolean;
     reason?: string;
     endingKey?: string;
@@ -236,7 +259,7 @@ export interface Scene {
     newlyLearnedRecipes?: Recipe[];
     updatedWeaponProficiencies?: { name: string; proficiency: Proficiency }[];
     updatedMagicMasteries?: { name: string; proficiency: Proficiency }[];
-    updatedSpecialSkills?: Partial<Character['specialSkills']>;
+    updatedSpecialSkills?: SpecialSkillUpdate[];
     specialSkillLearnedNotification?: string;
     xpGains?: string[];
     levelupNotification?: string;
@@ -251,5 +274,5 @@ export interface Scene {
     updatedCompanions?: Companion[];
     tamingResult?: TamingResult;
     reanimationResult?: ReanimationResult;
-    journalUpdates?: Partial<Journal>;
+    journalUpdates?: JournalUpdate[];
 }

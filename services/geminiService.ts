@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { Character, Scene, Enemy, NPC } from '../types';
 import { retrieveRelevantLore } from './ragService';
@@ -105,383 +106,226 @@ async function callGeminiWithRetry(params: any, isBackstory = false) {
     }
 }
 
+// --- START: SIMPLIFIED SCHEMAS ---
 
 const recipeMaterialSchema = {
     type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING },
-        quantity: { type: Type.INTEGER },
-    },
+    properties: { name: { type: Type.STRING }, quantity: { type: Type.INTEGER } },
     required: ['name', 'quantity'],
 };
-
 const recipeSchema = {
     type: Type.OBJECT,
     properties: {
-        id: { type: Type.STRING },
-        name: { type: Type.STRING },
-        description: { type: Type.STRING },
-        materials: { 
-            type: Type.ARRAY,
-            items: recipeMaterialSchema,
-        },
-        result: { 
-            type: Type.OBJECT, 
-            properties: {
-                name: { type: Type.STRING },
-                quantity: { type: Type.INTEGER },
-            },
-            required: ['name', 'quantity'],
-        },
+        id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING },
+        materials: { type: Type.ARRAY, items: recipeMaterialSchema },
+        result: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, quantity: { type: Type.INTEGER } }, required: ['name', 'quantity'] },
     },
-    required: ['id', 'name', 'description', 'materials', 'result'],
+    required: ['id', 'name', 'description', 'materials', 'result']
 };
-
 const companionStatsSchema = {
     type: Type.OBJECT,
     properties: {
-        hp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER },
-        attack: { type: Type.INTEGER }, defense: { type: Type.INTEGER },
-        speed: { type: Type.INTEGER },
-        san: { type: Type.INTEGER }, maxSan: { type: Type.INTEGER },
-        mana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER },
-        stamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER },
-        charisma: { type: Type.INTEGER },
+        hp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, attack: { type: Type.INTEGER }, defense: { type: Type.INTEGER },
+        speed: { type: Type.INTEGER }, san: { type: Type.INTEGER }, maxSan: { type: Type.INTEGER }, mana: { type: Type.INTEGER },
+        maxMana: { type: Type.INTEGER }, stamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER }, charisma: { type: Type.INTEGER },
     },
     required: ['hp', 'maxHp', 'attack', 'defense', 'speed', 'san', 'maxSan', 'mana', 'maxMana', 'stamina', 'maxStamina', 'charisma'],
 };
-
 const companionSchema = {
     type: Type.OBJECT,
     properties: {
-        name: { type: Type.STRING, description: "Tên đồng hành." },
-        type: { type: Type.STRING, description: "Loại đồng hành (Zombie, Sói...)." },
-        stats: companionStatsSchema,
-        statusEffects: { 
-            type: Type.ARRAY, 
-            items: { type: Type.STRING },
-            description: "Hiệu ứng trạng thái (mảng rỗng nếu không có)."
-        },
-        isUndead: { type: Type.BOOLEAN, description: "True nếu là bất tử." }
+        name: { type: Type.STRING }, type: { type: Type.STRING }, stats: companionStatsSchema,
+        statusEffects: { type: Type.ARRAY, items: { type: Type.STRING } }, isUndead: { type: Type.BOOLEAN }
     },
     required: ['name', 'type', 'stats', 'statusEffects', 'isUndead'],
 };
-
 const tamingResultSchema = {
     type: Type.OBJECT,
     properties: {
-        success: { type: Type.BOOLEAN, description: "Thuần hóa thành công?" },
-        creatureName: { type: Type.STRING, description: "Tên sinh vật." },
-        creatureType: { type: Type.STRING, description: "Loại sinh vật." },
-        companion: { ...companionSchema, description: "Đối tượng companion (nếu thành công)." },
+        success: { type: Type.BOOLEAN }, creatureName: { type: Type.STRING }, creatureType: { type: Type.STRING },
+        companion: { ...companionSchema },
     },
     required: ['success', 'creatureName', 'creatureType'],
 };
-
 const reanimationResultSchema = {
     type: Type.OBJECT,
     properties: {
-        success: { type: Type.BOOLEAN, description: "Gọi hồn thành công?" },
-        creatureName: { type: Type.STRING, description: "Tên xác chết." },
-        companion: { ...companionSchema, description: "Đối tượng companion (nếu thành công)." },
-        message: { type: Type.STRING, description: "Thông báo kết quả." }
+        success: { type: Type.BOOLEAN }, creatureName: { type: Type.STRING }, companion: { ...companionSchema },
+        message: { type: Type.STRING }
     },
     required: ['success', 'creatureName', 'message'],
 };
-
-
+const enemyStatsSchema = {
+    type: Type.OBJECT,
+    properties: {
+        hp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER }, attack: { type: Type.INTEGER },
+        defense: { type: Type.INTEGER }, speed: { type: Type.INTEGER },
+    },
+    required: ['hp', 'maxHp', 'attack', 'defense', 'speed']
+};
+const bodyPartsSchema = {
+    type: Type.OBJECT,
+    properties: {
+        head: { type: Type.STRING }, torso: { type: Type.STRING }, leftArm: { type: Type.STRING },
+        rightArm: { type: Type.STRING }, leftLeg: { type: Type.STRING }, rightLeg: { type: Type.STRING },
+    },
+    required: ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg']
+};
 const enemySchema = {
     type: Type.OBJECT,
     properties: {
-        id: { type: Type.STRING, description: "ID duy nhất." },
-        name: { type: Type.STRING, description: "Tên kẻ thù." },
-        description: { type: Type.STRING, description: "Mô tả ngắn gọn." },
-        stats: {
-            type: Type.OBJECT,
-            properties: {
-                hp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER },
-                attack: { type: Type.INTEGER }, defense: { type: Type.INTEGER },
-                speed: { type: Type.INTEGER },
-            },
-            required: ['hp', 'maxHp', 'attack', 'defense', 'speed'],
-            description: "Chỉ số chiến đấu."
-        },
-        bodyParts: {
-            type: Type.OBJECT,
-            properties: {
-                head: { type: Type.STRING, description: "Trạng thái: Khỏe Mạnh, Bị Thương, Nguy Kịch, Bị Cắt Đứt" }, 
-                torso: { type: Type.STRING },
-                leftArm: { type: Type.STRING }, 
-                rightArm: { type: Type.STRING },
-                leftLeg: { type: Type.STRING }, 
-                rightLeg: { type: Type.STRING },
-            },
-            required: ['head', 'torso', 'leftArm', 'rightArm', 'leftLeg', 'rightLeg'],
-            description: "Trạng thái các bộ phận cơ thể."
-        },
-        telegraphedAction: { type: Type.STRING, description: "Hành động sắp tới của kẻ thù." },
-        statusEffects: { 
-            type: Type.ARRAY, 
-            items: { type: Type.STRING },
-            description: "Hiệu ứng trạng thái (mảng rỗng nếu không có)."
-        },
+        id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING },
+        stats: enemyStatsSchema, bodyParts: bodyPartsSchema, telegraphedAction: { type: Type.STRING },
+        statusEffects: { type: Type.ARRAY, items: { type: Type.STRING } },
     },
     required: ['id', 'name', 'description', 'stats', 'bodyParts', 'telegraphedAction', 'statusEffects'],
 };
-
 const npcSchema = {
     type: Type.OBJECT,
     properties: {
-        id: { type: Type.STRING, description: "ID duy nhất cho NPC." },
-        name: { type: Type.STRING, description: "Tên NPC." },
-        description: { type: Type.STRING, description: "Mô tả ngoại hình, hành vi của NPC." },
-        disposition: {
-            type: Type.STRING,
-            enum: ['Thân thiện', 'Trung lập', 'Thù địch', 'Sợ hãi'],
-            description: "Thái độ của NPC đối với người chơi."
-        },
-        dialogueHistory: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-            description: "Lịch sử hội thoại ngắn gọn để duy trì ngữ cảnh."
-        }
+        id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING },
+        disposition: { type: Type.STRING },
+        dialogueHistory: { type: Type.ARRAY, items: { type: Type.STRING } }
     },
     required: ['id', 'name', 'description', 'disposition']
 };
-
-
 const skillSchema = {
     type: Type.OBJECT,
     properties: {
-        id: { type: Type.STRING, description: "ID kỹ năng (tiếng Anh, không dấu)." },
-        name: { type: Type.STRING, description: "Tên kỹ năng." },
-        description: { type: Type.STRING, description: "Mô tả kỹ năng." },
-        costType: { type: Type.STRING, description: "Loại tài nguyên: hp, mana, stamina." },
-        costAmount: { type: Type.INTEGER, description: "Số tài nguyên." },
-        cooldown: { type: Type.INTEGER, description: "Lượt hồi chiêu." },
-        currentCooldown: { type: Type.INTEGER, description: "Hồi chiêu còn lại (0 cho kỹ năng mới)." },
-        school: { type: Type.STRING, description: "Trường phái phép thuật." },
+        id: { type: Type.STRING }, name: { type: Type.STRING }, description: { type: Type.STRING },
+        costType: { type: Type.STRING }, costAmount: { type: Type.INTEGER }, cooldown: { type: Type.INTEGER },
+        currentCooldown: { type: Type.INTEGER }, school: { type: Type.STRING },
     },
-    required: ['id', 'name', 'description', 'costType', 'costAmount', 'cooldown', 'currentCooldown'],
+    required: ['id', 'name', 'description', 'costType', 'costAmount', 'cooldown', 'currentCooldown']
 };
-
 const proficiencySchema = {
     type: Type.OBJECT,
     properties: {
-        unlocked: { type: Type.BOOLEAN },
-        level: { type: Type.INTEGER }, 
-        xp: { type: Type.INTEGER },
+        unlocked: { type: Type.BOOLEAN }, level: { type: Type.INTEGER }, xp: { type: Type.INTEGER },
         xpToNextLevel: { type: Type.INTEGER },
     },
-    required: ['unlocked', 'level', 'xp', 'xpToNextLevel'],
+    required: ['unlocked', 'level', 'xp', 'xpToNextLevel']
 };
-
 const faithStatusSchema = {
     type: Type.OBJECT,
     properties: {
         markLevel: { type: Type.INTEGER }, faithPoints: { type: Type.INTEGER },
         faithPointsToNextLevel: { type: Type.INTEGER },
     },
-    required: ['markLevel', 'faithPoints', 'faithPointsToNextLevel'],
+    required: ['markLevel', 'faithPoints', 'faithPointsToNextLevel']
 };
-
 const followerSchema = {
     type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING }, loyalty: { type: Type.INTEGER }, status: { type: Type.STRING },
-    },
-    required: ['name', 'loyalty', 'status'],
+    properties: { name: { type: Type.STRING }, loyalty: { type: Type.INTEGER }, status: { type: Type.STRING } },
+    required: ['name', 'loyalty', 'status']
 };
-
 const sanctuarySchema = {
     type: Type.OBJECT,
     properties: {
-        name: { type: Type.STRING }, hope: { type: Type.INTEGER },
-        population: { type: Type.INTEGER },
+        name: { type: Type.STRING }, hope: { type: Type.INTEGER }, population: { type: Type.INTEGER },
         improvements: { type: Type.ARRAY, items: { type: Type.STRING } },
         followers: { type: Type.ARRAY, items: followerSchema },
     },
-    required: ['name', 'hope', 'population', 'improvements', 'followers'],
+    required: ['name', 'hope', 'population', 'improvements', 'followers']
 };
-
 const hitChanceSchema = {
     type: Type.OBJECT,
-    properties: {
-        choice: { type: Type.STRING },
-        chance: { type: Type.INTEGER },
-    },
+    properties: { choice: { type: Type.STRING }, chance: { type: Type.INTEGER } },
     required: ['choice', 'chance'],
 };
-
 const weaponProficiencyUpdateSchema = {
     type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING },
-        proficiency: proficiencySchema,
-    },
+    properties: { name: { type: Type.STRING }, proficiency: proficiencySchema },
     required: ['name', 'proficiency'],
 };
-
 const magicMasteryUpdateSchema = {
     type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING },
-        proficiency: proficiencySchema,
-    },
+    properties: { name: { type: Type.STRING }, proficiency: proficiencySchema },
     required: ['name', 'proficiency'],
 };
-
 const faithUpdateSchema = {
     type: Type.OBJECT,
-    properties: {
-        name: { type: Type.STRING },
-        status: faithStatusSchema,
-    },
+    properties: { name: { type: Type.STRING }, status: faithStatusSchema },
     required: ['name', 'status'],
 };
-
 const journalEntrySchema = {
     type: Type.OBJECT,
-    properties: {
-        title: { type: Type.STRING },
-        content: { type: Type.STRING },
-    },
-    required: ['title', 'content'],
+    properties: { title: { type: Type.STRING }, content: { type: Type.STRING } },
+    required: ['title', 'content']
 };
-
 const inventoryChangeSchema = {
     type: Type.OBJECT,
-    properties: {
-        itemName: { type: Type.STRING },
-        quantity: { type: Type.INTEGER },
-    },
+    properties: { itemName: { type: Type.STRING }, quantity: { type: Type.INTEGER } },
     required: ['itemName', 'quantity'],
 };
-
 const markLevelUpEventSchema = {
     type: Type.OBJECT,
-    properties: {
-        deity: { type: Type.STRING },
-        newLevel: { type: Type.INTEGER },
-    },
-    required: ['deity', 'newLevel'],
+    properties: { deity: { type: Type.STRING }, newLevel: { type: Type.INTEGER } },
+    required: ['deity', 'newLevel']
 };
+
+// NEW SIMPLIFIED ARRAY-BASED SCHEMAS
+const statChangeSchema = {
+    type: Type.OBJECT,
+    properties: { stat: { type: Type.STRING }, change: { type: Type.INTEGER } },
+    required: ['stat', 'change'],
+};
+const bodyPartChangeSchema = {
+    type: Type.OBJECT,
+    properties: { part: { type: Type.STRING }, status: { type: Type.STRING } },
+    required: ['part', 'status'],
+};
+const specialSkillUpdateSchema = {
+    type: Type.OBJECT,
+    properties: { name: { type: Type.STRING }, proficiency: proficiencySchema },
+    required: ['name', 'proficiency'],
+};
+const journalUpdateSchema = {
+    type: Type.OBJECT,
+    properties: { category: { type: Type.STRING }, title: { type: Type.STRING }, content: { type: Type.STRING } },
+    required: ['category', 'title', 'content'],
+};
+
 
 const sceneSchema = {
   type: Type.OBJECT,
   properties: {
-    description: { type: Type.STRING, description: "Bắt buộc. Mô tả chi tiết, kể chuyện về cảnh hiện tại." },
-    choices: { 
-        type: Type.ARRAY, 
-        items: { type: Type.STRING }, 
-        description: "Bắt buộc. Danh sách lựa chọn cho người chơi (ít nhất 1)." 
-    },
-    hitChances: { 
-        type: Type.ARRAY, 
-        items: hitChanceSchema,
-        description: "Tùy chọn. Tỷ lệ % trúng đòn cho lựa chọn."
-    },
-    enemies: { 
-        type: Type.ARRAY, 
-        items: enemySchema,
-        description: "Bắt buộc. Danh sách kẻ thù (mảng rỗng nếu không có)."
-    },
-    npcs: {
-        type: Type.ARRAY,
-        items: npcSchema,
-        description: "Tùy chọn. Danh sách các NPC trong cảnh. Nếu một NPC từ prompt vẫn còn ở đây, hãy bao gồm lại họ, có thể với thái độ đã thay đổi."
-    },
-    statChanges: {
-        type: Type.OBJECT,
-        properties: {
-            hp: { type: Type.INTEGER }, maxHp: { type: Type.INTEGER },
-            san: { type: Type.INTEGER }, maxSan: { type: Type.INTEGER },
-            mana: { type: Type.INTEGER }, maxMana: { type: Type.INTEGER },
-            stamina: { type: Type.INTEGER }, maxStamina: { type: Type.INTEGER },
-            attack: { type: Type.INTEGER }, defense: { type: Type.INTEGER },
-            speed: { type: Type.INTEGER }, charisma: { type: Type.INTEGER },
-        },
-        description: "Tùy chọn. Thay đổi chỉ số người chơi (+/-)."
-    },
-    inventoryChanges: {
-        type: Type.ARRAY,
-        items: inventoryChangeSchema,
-        description: "Tùy chọn. Thay đổi vật phẩm trong túi đồ (+/-)."
-    },
-    bodyPartChanges: {
-        type: Type.OBJECT,
-        properties: {
-            head: { type: Type.STRING, description: "Trạng thái: Khỏe Mạnh, Bị Thương, Nguy Kịch, Bị Cắt Đứt" },
-            torso: { type: Type.STRING },
-            leftArm: { type: Type.STRING },
-            rightArm: { type: Type.STRING },
-            leftLeg: { type: Type.STRING },
-            rightLeg: { type: Type.STRING },
-        },
-        description: "Tùy chọn. Cập nhật trạng thái bộ phận cơ thể."
-    },
-    gameOver: { type: Type.BOOLEAN, description: "Bắt buộc. true nếu game over." },
-    reason: { type: Type.STRING, description: "Tùy chọn. Lý do game over." },
-    endingKey: { type: Type.STRING, description: "Tùy chọn. Key định danh cho một kết thúc cụ thể (ví dụ: ESCAPE_ALONE, PUPPET_FATE). Dùng cho các kết thúc đặc biệt, không phải chết do HP/SAN." },
-    updatedSkills: { 
-        type: Type.ARRAY, 
-        items: skillSchema,
-        description: "Tùy chọn. Danh sách các kỹ năng mới học hoặc được cập nhật (ví dụ: hồi chiêu)."
-    },
-    newlyLearnedRecipes: { 
-        type: Type.ARRAY, 
-        items: recipeSchema,
-        description: "Tùy chọn. Công thức mới học được."
-    },
-    updatedWeaponProficiencies: { 
-        type: Type.ARRAY, 
-        items: weaponProficiencyUpdateSchema,
-        description: "Tùy chọn. Cập nhật thông thạo vũ khí."
-    },
-    updatedMagicMasteries: {
-        type: Type.ARRAY,
-        items: magicMasteryUpdateSchema,
-        description: "Tùy chọn. Cập nhật thông thạo phép thuật."
-    },
-    updatedSpecialSkills: {
-        type: Type.OBJECT,
-        properties: {
-            BeastTaming: proficiencySchema,
-            Necromancy: proficiencySchema,
-        },
-        description: "Tùy chọn. Cập nhật kỹ năng đặc biệt."
-    },
-    specialSkillLearnedNotification: { type: Type.STRING, description: "Tùy chọn. Thông báo học kỹ năng đặc biệt." },
-    xpGains: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Tùy chọn. Thông báo nhận XP." },
-    levelupNotification: { type: Type.STRING, description: "Tùy chọn. Thông báo lên cấp." },
-    skillLearnedNotification: { type: Type.STRING, description: "Tùy chọn. Thông báo học kỹ năng." },
-    recipeLearnedNotification: { type: Type.STRING, description: "Tùy chọn. Thông báo học công thức." },
-    updatedFaith: { 
-        type: Type.ARRAY,
-        items: faithUpdateSchema,
-        description: "Tùy chọn. Cập nhật tín ngưỡng."
-    },
-    updatedSanctuary: { ...sanctuarySchema, description: "Tùy chọn. Cập nhật Thánh Địa." },
-    faithNotification: { type: Type.STRING, description: "Tùy chọn. Thông báo tín ngưỡng." },
-    sanctuaryNotification: { type: Type.STRING, description: "Tùy chọn. Thông báo Thánh Địa." },
-    markLevelUpEvent: { ...markLevelUpEventSchema, description: "Tùy chọn. Sự kiện lên cấp Ấn Ký." },
-    companionActionDescriptions: { type: Type.ARRAY, items: {type: Type.STRING}, description: "Tùy chọn. Mô tả hành động đồng hành." },
-    updatedCompanions: { type: Type.ARRAY, items: companionSchema, description: "Tùy chọn. Danh sách đồng hành đã cập nhật." },
-    tamingResult: { ...tamingResultSchema, description: "Tùy chọn. Kết quả thuần hóa." },
-    reanimationResult: { ...reanimationResultSchema, description: "Tùy chọn. Kết quả gọi hồn." },
-    journalUpdates: {
-        type: Type.OBJECT,
-        properties: {
-            quests: { type: Type.ARRAY, items: journalEntrySchema },
-            lore: { type: Type.ARRAY, items: journalEntrySchema },
-            characters: { type: Type.ARRAY, items: journalEntrySchema },
-            bestiary: { type: Type.ARRAY, items: journalEntrySchema },
-        },
-        description: "Tùy chọn. Cập nhật nhật ký."
-    }
+    description: { type: Type.STRING },
+    choices: { type: Type.ARRAY, items: { type: Type.STRING } },
+    hitChances: { type: Type.ARRAY, items: hitChanceSchema },
+    enemies: { type: Type.ARRAY, items: enemySchema },
+    npcs: { type: Type.ARRAY, items: npcSchema },
+    statChanges: { type: Type.ARRAY, items: statChangeSchema },
+    inventoryChanges: { type: Type.ARRAY, items: inventoryChangeSchema },
+    bodyPartChanges: { type: Type.ARRAY, items: bodyPartChangeSchema },
+    gameOver: { type: Type.BOOLEAN },
+    reason: { type: Type.STRING },
+    endingKey: { type: Type.STRING },
+    updatedSkills: { type: Type.ARRAY, items: skillSchema },
+    newlyLearnedRecipes: { type: Type.ARRAY, items: recipeSchema },
+    updatedWeaponProficiencies: { type: Type.ARRAY, items: weaponProficiencyUpdateSchema },
+    updatedMagicMasteries: { type: Type.ARRAY, items: magicMasteryUpdateSchema },
+    updatedSpecialSkills: { type: Type.ARRAY, items: specialSkillUpdateSchema },
+    specialSkillLearnedNotification: { type: Type.STRING },
+    xpGains: { type: Type.ARRAY, items: { type: Type.STRING } },
+    levelupNotification: { type: Type.STRING },
+    skillLearnedNotification: { type: Type.STRING },
+    recipeLearnedNotification: { type: Type.STRING },
+    updatedFaith: { type: Type.ARRAY, items: faithUpdateSchema },
+    updatedSanctuary: { ...sanctuarySchema },
+    faithNotification: { type: Type.STRING },
+    sanctuaryNotification: { type: Type.STRING },
+    markLevelUpEvent: { ...markLevelUpEventSchema },
+    companionActionDescriptions: { type: Type.ARRAY, items: {type: Type.STRING} },
+    updatedCompanions: { type: Type.ARRAY, items: companionSchema },
+    tamingResult: { ...tamingResultSchema },
+    reanimationResult: { ...reanimationResultSchema },
+    journalUpdates: { type: Type.ARRAY, items: journalUpdateSchema },
   },
   required: ['description', 'choices', 'enemies', 'gameOver'],
 };
+
+// --- END: SIMPLIFIED SCHEMAS ---
 
 
 const NARRATOR_SYSTEM_INSTRUCTION = `Bạn là Người Quản Trò (Game Master), một AI dẫn chuyện cho một RPG văn bản kỳ ảo hắc ám. Bạn chỉ tập trung vào tường thuật, khám phá và sinh tồn.
@@ -635,8 +479,12 @@ ${JSON.stringify(currentNpcs, null, 2)}
     } catch (error) {
         console.error("Lỗi khi tạo cảnh:", error);
         console.error("Prompt đã gửi:", prompt);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const displayError = `Gemini API Error:
+${JSON.stringify(error, null, 2)}`;
+
         return {
-            description: `Một sự cố kỳ lạ đã xảy ra. Các thực thể dường như đang chống lại ý chí của bạn. Có lẽ bạn nên thử lại một hành động khác, hoặc khởi động lại dòng thời gian.\n\nLỗi kỹ thuật: ${error instanceof Error ? error.message : String(error)}`,
+            description: `Một sự cố kỳ lạ đã xảy ra. Các thực thể dường như đang chống lại ý chí của bạn. Có lẽ bạn nên thử lại một hành động khác, hoặc khởi động lại dòng thời gian.\n\nLỗi kỹ thuật: ${errorMessage}`,
             choices: ["Thử lại hành động trước đó.", "Cố gắng chờ đợi.", "Quan sát xung quanh."],
             gameOver: false,
             enemies: [],
